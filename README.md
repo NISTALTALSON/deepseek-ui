@@ -1,40 +1,72 @@
 # deepseek-ui
 
-Open-source agent layer for DeepSeek: MCP tools, Claude-style skills, a real permission system, and (next) a GUI that gives DeepSeek local system access.
+Open-source agent layer for DeepSeek: MCP tools, Claude-style skills, a real permission system, and a GUI. Goal: use DeepSeek heavily, for as close to zero cost as possible, with the same powers (MCP, skills, plugins) that Claude has.
 
-**Why DeepSeek:** V4 has a 1M-token context, 384K max output, native tool calling, very low cached-input pricing, and OpenAI + Anthropic compatible endpoints. The model is not the bottleneck. The harness is.
+## Architecture
 
-## Status: Milestone 1 (engine), working
+```
+ ui/  (fork of DeepSeek's official MIT chat-demo, React + zustand)
+   |   speaks the Anthropic Messages protocol, streaming
+   v
+ gateway (src/, planned)  <- local server, our engine runs here
+   |-- agent loop (plan -> tool -> observe)
+   |-- MCP hub (any MCP server: Desktop Commander, filesystem, GitHub...)
+   |-- skills loader (SKILL.md, progressive loading)
+   |-- permissions (allow / ask / deny, enforced in code)
+   v
+ any provider: DeepSeek API | OpenRouter free tier | LM Studio (local)
+```
 
-| Piece | File | State |
+Why a gateway: a browser cannot spawn MCP stdio servers or touch the filesystem. The official UI already lets you point `apiOrigin` at any compatible server (`ui/rspack.config.ts`), so the gateway is the seam.
+
+## Status
+
+| Piece | Where | State |
 |---|---|---|
-| Streaming DeepSeek client with `reasoning_content` round-trip | `src/deepseek.ts` | tested (unit) |
-| Agent loop (plan, tool, observe) with iteration cap + output truncation | `src/agent.ts` | untested against live API |
-| MCP client (stdio), tools namespaced `server__tool` | `src/mcp.ts` | untested against a live server |
-| Skills loader (`SKILL.md`, progressive loading via `load_skill`) | `src/skills.ts` | tested |
-| Permissions (allow / ask / deny, glob rules) | `src/permissions.ts` | tested |
-| Terminal harness | `src/cli.ts` | untested |
+| DeepSeek client with `reasoning_content` round-trip | `src/deepseek.ts` | unit tested |
+| Agent loop, iteration cap, output truncation | `src/agent.ts` | not yet run against a live API |
+| MCP hub (stdio), tools namespaced `server__tool` | `src/mcp.ts` | not yet run against a live server |
+| Skills loader | `src/skills.ts` | unit tested |
+| Permissions | `src/permissions.ts` | unit tested |
+| Terminal harness | `src/cli.ts` | not yet run |
+| Official UI vendored, builds on Windows | `ui/` | builds (4.2 MB), not yet wired to a gateway |
+| Gateway (Anthropic Messages endpoint in front of the engine) | `src/gateway.ts` | next |
 
-Run: `npm install --include=dev`, then `DEEPSEEK_API_KEY=... npm run dev`. Tests: `npm test`.
-(`--include=dev` matters if `NODE_ENV=production` is set globally, since npm then silently skips devDependencies.)
+Engine: `npm install --include=dev`, `DEEPSEEK_API_KEY=... npm run dev`, `npm test`.
+UI: `cd ui`, `pnpm install`, `pnpm dev` (http://localhost:8090), `pnpm build`.
+(If `NODE_ENV=production` is set globally, npm/pnpm silently skip devDependencies. Set `NODE_ENV=development` for installs.)
+
+## Staying free (honest version)
+
+DeepSeek's API is prepaid per token, so "free" depends on the route. Verify each in its own console before relying on it.
+
+| Route | Cost | Catch |
+|---|---|---|
+| OpenRouter `deepseek/deepseek-v4-flash:free` | free | reported cap about 200 requests/day. An agent loop uses one request per tool call, so this runs out fast. Free models can change without notice. |
+| DeepSeek signup grant | free once | third-party sites claim a one-time 5M-token grant; DeepSeek's own pricing page does not publish one. Check the console. |
+| Local model via LM Studio | free forever | 16 GB RAM laptop limits you to small quantized models. Weak at long context and tool calling. |
+| Official API, V4.1-Flash | very cheap | off-peak about $0.15/M input, $0.003/M cached. Not zero. |
+| Unofficial web-chat adapters | free | reverse-engineer private endpoints, break often, risk account bans. We do not build on these. |
+
+Design consequence: the engine is provider-agnostic (configurable base URL), spends as few requests as possible (parallel tool calls, cache-friendly stable prefix, summarised tool output), and will show a live request/cost meter.
 
 ## Research findings (Nov 2026)
 
-**DeepSeek is cheap, not free.** Since Aug 16 2026 pricing has peak and off-peak rates (weekday peak is about 2x). Cache hits are the big saving. Treat "cheap + 1M context" as the pitch, not "free".
-
-**The wedge: thinking mode + tools breaks other clients.** DeepSeek requires `reasoning_content` from earlier assistant turns to be sent back when tools are in the request, otherwise it returns 400. This broke Cursor, opencode, LangChain and claude-code-router on V4 (a proxy exists just to patch it). Our client stores assistant messages verbatim and never rebuilds them. Note: some blog posts say "never resend reasoning_content". The official thinking-mode guide says to resend it with tools, which is what we follow. Verify against https://api-docs.deepseek.com/guides/thinking_mode.
-
-**Open WebUI weak spots:** MCP is not native by design (needs the `mcpo` proxy), agent loops are capped by `CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS`, no context trimming by design, RAM growth with document uploads, and users report native web search is weak. It is a server app, so no local machine access.
-
-**LibreChat weak spots:** heavy stack (MongoDB + MeiliSearch + Node, about 2-4 GB RAM), verbose `librechat.yaml`, web only (no desktop app). It already ships Agents, MCP and Skills, so "we have skills" is not a differentiator on its own.
-
-**Our angle:** local-first desktop app (real filesystem and terminal via MCP, no Docker/Mongo), DeepSeek-native behaviour (reasoning round-trip, thinking modes, cache-friendly prompt prefixes, 1M-context handling), and a permission layer that lives in code, not in the prompt.
+- **Thinking mode + tools breaks other clients.** DeepSeek returns 400 unless earlier `reasoning_content` is sent back when tools are in the request. This broke Cursor, opencode, LangChain and claude-code-router on V4. Our client stores assistant messages verbatim. Some blog posts say never to resend it; the official thinking-mode guide says to resend it with tools, which we follow. https://api-docs.deepseek.com/guides/thinking_mode
+- **Open WebUI:** MCP needs the `mcpo` proxy, agent loops are capped, memory grows with uploads, server app (no local machine access).
+- **LibreChat:** MongoDB + MeiliSearch stack (about 2-4 GB RAM), verbose config, web only. Already ships Agents, MCP and Skills.
+- **DeepSeek's own UI (Nov 13 2026):** official, MIT, static, no backend, no tool or agent layer. That is the gap we fill.
 
 ## Roadmap
 
-1. Verify the loop end to end against the live API and Desktop Commander MCP.
-2. Cache-aware context manager (stable prefix first so cache hits stay high; summarise tool output).
-3. Electron shell + chat UI (streaming, collapsible reasoning, tool-call cards, approve/deny prompts).
-4. Plugin manifest (bundle skills + MCP servers + commands, one-step install).
-5. Persistent sessions and a cost meter (peak/off-peak aware).
-6. Prompt-injection hardening for tool results (treat as untrusted data).
+1. Gateway: Anthropic Messages endpoint that runs the agent loop; tool activity streamed to the UI.
+2. UI changes: tool-call cards, approve/deny prompts, skills and MCP panels, request/cost meter.
+3. Verify end to end with Desktop Commander as the first MCP server.
+4. Cache-aware context manager.
+5. Plugin manifest (skills + MCP servers + commands, one-step install).
+6. Prompt-injection hardening: tool results are untrusted data.
+7. Desktop packaging (Electron; Rust is not required).
+
+## License
+
+MIT. `ui/` is derived from https://github.com/deepseek-ai/chat-demo (MIT, Copyright (c) 2026 DeepSeek); see `ui/LICENSE` and `ui/UPSTREAM.md`.
