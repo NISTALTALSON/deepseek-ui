@@ -282,6 +282,16 @@ export const createGateway = async (config: GatewayConfig = {}) => {
         json(res, 404, { error: { message: "Project not found" } });
         return;
       }
+      const projectConversationsMatch = requestUrl.pathname.match(/^\/projects\/([^/]+)\/conversations$/);
+      if (projectConversationsMatch && req.method === "GET") {
+        if (!await store.getProject(projectConversationsMatch[1], owner)) {
+          json(res, 404, { error: { message: "Project not found" } });
+          return;
+        }
+        const conversations = (await store.listConversations(owner)).filter((conversation) => conversation.metadata.projectId === projectConversationsMatch[1]);
+        json(res, 200, { conversations });
+        return;
+      }
       json(res, 200, { files: await store.listFiles(owner, projectFilesMatch[1]) });
       return;
     }

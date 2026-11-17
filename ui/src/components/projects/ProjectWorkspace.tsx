@@ -12,12 +12,14 @@ import {
   uploadProjectFile,
   useProjects,
 } from '../../services/projects.js'
+import { selectSession } from '../../services/chat/store.js'
 import styles from './ProjectWorkspace.module.css'
 
 export const ProjectWorkspace = ({ open, onClose }: { open: boolean; onClose: () => void }) => {
   const projects = useProjects((state) => state.projects)
   const selectedProjectId = useProjects((state) => state.selectedProjectId)
   const files = useProjects((state) => state.files)
+  const conversations = useProjects((state) => state.conversations)
   const project = projects.find((item) => item.id === selectedProjectId)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -90,6 +92,11 @@ export const ProjectWorkspace = ({ open, onClose }: { open: boolean; onClose: ()
           </div>
           {project ? (
             <div className={styles.files}>
+              <div className={styles.conversationHistory}>
+                <h3>Project conversations</h3>
+                {conversations.map((conversation) => <button type="button" className={styles.conversation} key={conversation.id} onClick={() => { selectSession(conversation.id); onClose() }}>{conversation.title || 'Untitled conversation'}<small>{conversation.model}</small></button>)}
+                {conversations.length === 0 ? <div className={styles.empty}>No conversations in this project yet.</div> : null}
+              </div>
               <div className={styles.filesHeader}><h3>Project files</h3><Button size="s" variant="outlined" onClick={() => inputRef.current?.click()}>Upload files</Button></div>
               <input ref={inputRef} hidden type="file" multiple onChange={(event) => {
                 const selected = Array.from(event.target.files ?? [])

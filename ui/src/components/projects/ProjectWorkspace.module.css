@@ -15,6 +15,10 @@
 .editor textarea { resize: vertical; }
 .actions { justify-content: flex-start; margin: 18px 0 24px; }
 .files { border-top: 1px solid var(--dsw-alias-border-l1); padding-top: 18px; }
+.conversationHistory { margin-bottom: 20px; }
+.conversationHistory h3 { margin-bottom: 8px; }
+.conversation { display: flex; justify-content: space-between; gap: 8px; width: 100%; padding: 8px 0; border: 0; border-bottom: 1px solid var(--dsw-alias-border-l2); background: transparent; color: var(--dsw-alias-label-primary); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.conversation small { color: var(--dsw-alias-label-tertiary); }
 .file { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--dsw-alias-border-l2); color: var(--dsw-alias-label-primary); font-size: 13px; }
 .empty { padding: 18px 4px; text-align: center; }
 @media (max-width: 720px) { .layout { grid-template-columns: 1fr; } .sidebar { border-right: 0; border-bottom: 1px solid var(--dsw-alias-border-l1); max-height: 210px; overflow: auto; } .editor { padding: 16px; } }

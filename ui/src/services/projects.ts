@@ -27,9 +27,17 @@ export type ProjectFile = {
   uploadedAt: string
 }
 
+export type ProjectConversation = {
+  id: string
+  title: string
+  updatedAt: string
+  model: string
+}
+
 type ProjectState = {
   projects: Project[]
   files: ProjectFile[]
+  conversations: ProjectConversation[]
   selectedProjectId?: string
   loading: boolean
   error?: string
@@ -54,6 +62,7 @@ const jsonRequest = async (url: string, init: RequestInit = {}) => {
 export const useProjects = create<ProjectState>(() => ({
   projects: [],
   files: [],
+  conversations: [],
   loading: false,
 }))
 
@@ -70,12 +79,15 @@ export const loadProjects = async () => {
 export const selectProject = async (projectId?: string) => {
   useProjects.setState({ selectedProjectId: projectId })
   if (!projectId) {
-    useProjects.setState({ files: [] })
+    useProjects.setState({ files: [], conversations: [] })
     return
   }
   try {
-    const body = await jsonRequest(`/projects/${encodeURIComponent(projectId)}/files`)
-    useProjects.setState({ files: body.files ?? [] })
+    const [filesBody, conversationsBody] = await Promise.all([
+      jsonRequest(`/projects/${encodeURIComponent(projectId)}/files`),
+      jsonRequest(`/projects/${encodeURIComponent(projectId)}/conversations`),
+    ])
+    useProjects.setState({ files: filesBody.files ?? [], conversations: conversationsBody.conversations ?? [] })
   } catch (error) {
     useProjects.setState({ error: error instanceof Error ? error.message : String(error) })
   }
