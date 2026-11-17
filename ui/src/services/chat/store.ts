@@ -6,6 +6,7 @@ import { extractFileIds, getFileErrorCode, isRetryableApiError } from '../api/er
 import { cancelUpload, describeUploadError, uploadAttachment, useUploads } from '../attachments.js'
 import { useSettings } from '../settings.js'
 import { useWorkspace } from '../workspace.js'
+import { useProjects } from '../projects.js'
 import { appendBranch, getVisibleMessages, normalizeSession, selectVersion } from './branches.js'
 import * as db from './db.js'
 import {
@@ -109,7 +110,8 @@ const sameSummary = (a: SessionSummary, b: SessionSummary) =>
   a.updatedAt === b.updatedAt &&
   a.pinned === b.pinned &&
   a.archived === b.archived &&
-  a.folder === b.folder
+  a.folder === b.folder &&
+  a.projectId === b.projectId
 
 const sessionAccess = new Map<string, number>()
 const unsavedSessions = new Set<string>()
@@ -658,6 +660,7 @@ export const sendMessage = (targetSessionId: string | null) => {
       updatedAt: now,
       messages: [],
       rootMessageId: null,
+      projectId: useProjects.getState().selectedProjectId,
     }
     sessionId = session.id
     touchSession(session.id)
@@ -1114,6 +1117,7 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
               .map((item) => item.id)
               .join(','),
             'x-deepseek-ui-provider': (initial.model ?? MODEL) === 'mock' ? 'mock' : 'deepseek',
+            ...(getSession(sessionId)?.projectId ? { 'x-deepseek-ui-project': getSession(sessionId)?.projectId } : {}),
           }
         )
         const blockIndexes = new Map<number, number>()

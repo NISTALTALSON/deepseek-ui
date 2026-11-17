@@ -26,6 +26,8 @@ import { closeMobileSider } from '../components/sider/mobileSiderState.js'
 import { MobileSider, Sider } from '../components/sider/Sider.js'
 import styles from './App.module.css'
 import { WorkspaceDialog } from '../components/workspace/WorkspaceDialog.js'
+import { ProjectWorkspace } from '../components/projects/ProjectWorkspace.js'
+import { closeProjects, useProjectDialog } from '../components/projects/projectDialogState.js'
 
 export const App = () => {
   const t = useTranslate()
@@ -50,6 +52,7 @@ export const App = () => {
     state.activeId === null ? false : Object.hasOwn(state.streaming, state.activeId)
   )
   const activeId = useChatStore((state) => state.activeId)
+  const projectsOpen = useProjectDialog((state) => state.open)
 
   usePreventPageScroll(isMobile)
 
@@ -135,6 +138,7 @@ export const App = () => {
       </div>
       <SettingsDialog />
       <WorkspaceDialog />
+      <ProjectWorkspace open={projectsOpen} onClose={closeProjects} />
       <Toast />
     </>
   )
