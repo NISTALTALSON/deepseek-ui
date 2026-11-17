@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ChangeEvent } from 'react'
 import { Button } from '../base/Button.js'
 import { Modal } from '../base/Modal.js'
 import { API_ORIGIN, request } from '../../services/api/client.js'
@@ -70,6 +70,25 @@ const AgentBuilderContent = () => {
       setBusy(false)
     }
   }
+  const exportAgent = () => {
+    if (!selected) { return }
+    const blob = new Blob([JSON.stringify(selected, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${selected.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'agent'}.json`
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+  const importAgent = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) { return }
+    const imported = JSON.parse(await file.text()) as Partial<Agent> & { name?: string }
+    if (!imported.name?.trim()) { return }
+    const created = await createAgent({ ...imported, id: undefined, name: `${imported.name} imported`, version: undefined, versions: undefined, createdAt: undefined, updatedAt: undefined })
+    selectAgent(created.id)
+  }
 
   return (
     <Modal title="Agents" closable className={styles.dialog} mainClassName={styles.main} onClose={closeAgents}>
@@ -91,6 +110,8 @@ const AgentBuilderContent = () => {
           <div className={styles.editorHeader}>
             <div><h2>{selected ? 'Edit agent' : 'Create agent'}</h2><p>Backend policy remains authoritative for every tool call.</p></div>
             {selected ? <Button size="s" variant="outlined" onClick={() => void duplicate()}>Duplicate</Button> : null}
+            {selected ? <Button size="s" variant="outlined" onClick={exportAgent}>Export</Button> : null}
+            <label className={styles.tab}><input hidden type="file" accept="application/json" onChange={(event) => void importAgent(event)} />Import</label>
           </div>
           <label>Name<input value={draft.name ?? ''} onChange={(event) => setField('name', event.target.value)} /></label>
           <label>Description<textarea rows={2} value={draft.description ?? ''} onChange={(event) => setField('description', event.target.value)} /></label>
@@ -107,8 +128,10 @@ const AgentBuilderContent = () => {
           <div className={styles.cards}>{tools.map((tool) => <label className={styles.card} key={tool.name}><input type="checkbox" checked={draft.allowedTools?.includes(tool.name) ?? false} onChange={(event) => setField('allowedTools', event.target.checked ? [...(draft.allowedTools ?? []), tool.name] : (draft.allowedTools ?? []).filter((item) => item !== tool.name))} /> <span>{tool.name}<small>{tool.description}</small></span></label>)}</div>
           <div className={styles.actions}>
             <Button size="m" variant="primary" disabled={busy || !draft.name?.trim()} onClick={() => void save()}>{busy ? 'Saving…' : 'Save agent'}</Button>
+            {selected ? <Button size="m" variant="outlined" onClick={() => { selectAgent(selected.id); closeAgents() }}>Test in chat</Button> : null}
             {selected ? <Button size="m" variant="danger" onClick={() => void deleteAgent(selected.id)}>Delete</Button> : null}
           </div>
+          {selected?.versions.length ? <small>Version {selected.version}. Previous versions: {selected.versions.map((item) => item.version).join(', ')}</small> : null}
         </section>
       </div>
     </Modal>
