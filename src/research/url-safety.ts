@@ -238,6 +238,30 @@ export const resolvePublicTarget = async (
   return { address: chosen.address, family: chosen.family };
 };
 
+/**
+ * Synchronous subset of URL validation for callers that resolve content
+ * elsewhere (for example deterministic fixtures): protocol, credentials,
+ * hostname, port, and literal-IP checks without any DNS lookup.
+ */
+export const validateDestinationSyntax = (
+  input: string,
+  allowedPorts: number[] = defaultPorts,
+): { url: URL; hostname: string; port: number } => {
+  const url = parseUrl(input);
+  const hostname = normalizeHostname(url.hostname);
+  if (isBlockedHostname(hostname)) {
+    throw new ResearchError("blocked_host", "Hostname is blocked for research retrieval.", { hostname });
+  }
+  const port = url.port ? Number(url.port) : url.protocol === "https:" ? 443 : 80;
+  if (!allowedPorts.includes(port)) {
+    throw new ResearchError("blocked_port", "Port is not allowed for research retrieval.", { port, allowedPorts });
+  }
+  if (isIP(hostname) && isBlockedAddress(hostname)) {
+    throw new ResearchError("private_address", "Destination address is not public.", { hostname });
+  }
+  return { url, hostname, port };
+};
+
 export const validateResearchUrl = async (
   input: string,
   options: UrlValidationOptions = {},

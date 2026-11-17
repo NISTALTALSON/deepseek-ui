@@ -80,7 +80,7 @@ const UNIT_PATTERN = "(?:%|percent|qubits?|million|billion|trillion|years?|month
 
 /** Extracts explicit number+unit claims used for conflict detection. */
 export const numericClaims = (text: string): NumericClaim[] => {
-  const pattern = new RegExp(`(\\d[\\d,]*(?:\\.\\d+)?)\\s*(${UNIT_PATTERN})\\b`, "gi");
+  const pattern = new RegExp(`(\\d[\\d,]*(?:\\.\\d+)?)[\\s-]*(${UNIT_PATTERN})(?![a-z])`, "gi");
   const claims: NumericClaim[] = [];
   for (let match = pattern.exec(text); match; match = pattern.exec(text)) {
     const value = Number(match[1]!.replace(/,/g, ""));
