@@ -30,6 +30,9 @@
 .link { color: var(--dsw-alias-button-primary-fill); font-size: 12px; }
 .history { display: flex; flex-direction: column; gap: 4px; padding: 8px 14px; border-bottom: 1px solid var(--dsw-alias-border-l1); }
 .history button { text-align: left; }
+.sources { display: flex; flex-direction: column; gap: 3px; padding: 8px 14px; border-bottom: 1px solid var(--dsw-alias-border-l1); }
+.sourcesTitle { color: var(--dsw-alias-label-tertiary); font-size: 11px; margin-bottom: 2px; }
+.sourceLink { overflow: hidden; color: var(--dsw-alias-button-primary-fill); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .content { min-height: 0; flex: 1; overflow: auto; padding: 16px; }
 .content textarea { width: 100%; height: 100%; min-height: 420px; resize: none; box-sizing: border-box; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; padding: 12px; background: transparent; color: inherit; font: 12px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
 .code { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace; }

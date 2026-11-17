@@ -9,6 +9,7 @@ export type ArtifactVersion = {
   createdAt: string
   createdBy: 'user' | 'assistant' | 'system'
   changeSummary?: string
+  sourceIds?: string[]
 }
 export type Artifact = {
   id: string

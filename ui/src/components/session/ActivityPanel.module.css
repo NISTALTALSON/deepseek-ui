@@ -55,6 +55,15 @@
   border-bottom: 1px solid var(--dsw-alias-border-l2);
 }
 
+.item[role='button'] {
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+.item[role='button']:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
 .itemTitle {
   display: flex;
   align-items: center;

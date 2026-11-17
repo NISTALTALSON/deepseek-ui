@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Markdown } from '../markdown/Markdown.js'
 import { artifactDownloadUrl, listArtifacts, restoreArtifact, updateArtifact, type Artifact } from '../../services/artifacts.js'
+import { listResearchSources, type ResearchSourceView } from '../../services/research.js'
+import { useSettings } from '../../services/settings.js'
 import styles from './ArtifactPanel.module.css'
 
 const currentVersion = (artifact: Artifact) => artifact.versions.find((item) => item.version === artifact.currentVersion) ?? artifact.versions.at(-1)
@@ -8,14 +10,20 @@ const currentVersion = (artifact: Artifact) => artifact.versions.find((item) => 
 const previewHtml = (content: string) => `<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data: https:;"><style>body{font-family:system-ui,sans-serif;padding:24px;color:#202124}*{max-width:100%}</style>${content}`
 
 export const ArtifactPanel = ({ conversationId, onClose }: { conversationId: string; onClose: () => void }) => {
+  const apiKey = useSettings((state) => state.apiKey) ?? ''
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [selectedId, setSelectedId] = useState<string>()
   const [draft, setDraft] = useState('')
   const [editing, setEditing] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [researchSources, setResearchSources] = useState<ResearchSourceView[]>([])
   const selected = artifacts.find((artifact) => artifact.id === selectedId)
   const version = selected ? currentVersion(selected) : undefined
+  const metadataSourceIds = selected?.metadata?.sourceIds
+  const linkedSourceIds = Array.isArray(metadataSourceIds)
+    ? metadataSourceIds.filter((value): value is string => typeof value === 'string')
+    : []
 
   useEffect(() => {
     const controller = new AbortController()
@@ -25,6 +33,19 @@ export const ArtifactPanel = ({ conversationId, onClose }: { conversationId: str
     }).catch(() => undefined)
     return () => controller.abort()
   }, [conversationId])
+
+  const sourceKey = linkedSourceIds.join(',')
+  useEffect(() => {
+    if (!sourceKey) {
+      setResearchSources([])
+      return
+    }
+    let cancelled = false
+    void listResearchSources(apiKey, conversationId)
+      .then((items) => { if (!cancelled) { setResearchSources(items) } })
+      .catch(() => { if (!cancelled) { setResearchSources([]) } })
+    return () => { cancelled = true }
+  }, [apiKey, conversationId, sourceKey])
 
   useEffect(() => {
     setDraft(version?.content ?? '')
@@ -88,6 +109,18 @@ export const ArtifactPanel = ({ conversationId, onClose }: { conversationId: str
         </select>
         {selected ? <a href={artifactDownloadUrl(selected)} className={styles.link}>Download</a> : null}
       </div>
+      {linkedSourceIds.length ? (
+        <div className={styles.sources}>
+          <div className={styles.sourcesTitle}>Research sources ({linkedSourceIds.length})</div>
+          {researchSources
+            .filter((source) => linkedSourceIds.includes(source.sourceId))
+            .map((source) => (
+              <a key={source.sourceId} className={styles.sourceLink} href={source.url} target="_blank" rel="noreferrer">
+                {source.isMock ? 'Mock · ' : ''}{source.title}
+              </a>
+            ))}
+        </div>
+      ) : null}
       {selected ? (
         <div className={styles.actions}>
           <button type="button" onClick={() => setEditing((value) => !value)}>{editing ? 'Preview' : 'Edit'}</button>
