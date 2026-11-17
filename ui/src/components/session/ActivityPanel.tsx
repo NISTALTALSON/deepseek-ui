@@ -1,10 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { AssistantMessage, ReplyBlock, Session } from '../../services/chat/types.js'
+import type { Source } from '../../services/chat/view.js'
+import { getSiteName } from '../../services/chat/view.js'
 import { decideApproval, getRecoveryState, listApprovals, listRuns, resumeRun, type ApprovalRecord, type RecoveryState } from '../../services/api/client.js'
+import { getResearchStatus, type ResearchStatus } from '../../services/research.js'
 import { useSettings } from '../../services/settings.js'
+import { useTranslate } from '../../i18n/index.js'
+import { toggleSearchPanel } from '../search/searchPanelState.js'
 import styles from './ActivityPanel.module.css'
 
-const labelForBlock = (block: ReplyBlock) => {
+const labelForBlock = (block: ReplyBlock): string | null => {
   if (block.type === 'server_tool_use') {
     return block.name === 'deepseek_web_search' ? 'Web search' : 'Read page'
   }
@@ -17,7 +22,7 @@ const labelForBlock = (block: ReplyBlock) => {
   return null
 }
 
-const detailForBlock = (block: ReplyBlock) => {
+const detailForBlock = (block: ReplyBlock): string => {
   if (block.type === 'server_tool_use') {
     const input = block.input
     if ('query' in input) {
@@ -32,18 +37,71 @@ const detailForBlock = (block: ReplyBlock) => {
     return input.url
   }
   if (block.type === 'web_search_tool_result') {
-    return `${block.content.length} sources returned`
+    const results = block.content.filter((item) => item.type === 'web_search_result')
+    const failed = block.content.some((item) => item.type === 'web_search_tool_result_error')
+    if (failed) { return 'Search failed or provider unavailable' }
+    const provider = results[0]?.provider
+    const mock = results.some((item) => item.is_mock)
+    return `${results.length} sources${provider ? ` · ${mock ? 'local mock' : provider}` : ''}`
   }
   if (block.type === 'web_fetch_tool_result') {
-    return 'error_code' in block.content ? block.content.error_code : block.content.content.title ?? 'Page fetched'
+    if ('error_code' in block.content) {
+      return `Blocked or unavailable: ${block.content.error_code}`
+    }
+    const extraction = block.content.extraction
+    const chars = extraction?.contentLength
+    return `${block.content.content.title ?? block.content.url}${typeof chars === 'number' ? ` · ${chars} chars extracted` : ''}`
   }
   return ''
 }
 
+const sourcesFromBlock = (block: ReplyBlock): Source[] => {
+  if (block.type === 'web_search_tool_result') {
+    let index = 0
+    return block.content.flatMap((item) => {
+      if (item.type !== 'web_search_result') { return [] }
+      index += 1
+      return [{
+        url: item.url,
+        title: item.title,
+        siteName: item.site_name?.trim() || getSiteName(item.url),
+        publishedAt: item.page_age,
+        snippet: item.snippet ?? null,
+        siteIcon: item.site_icon ?? null,
+        index: item.citation_index ?? index,
+        sourceId: item.source_id,
+        provider: item.provider,
+        isMock: item.is_mock,
+        retrievedAt: item.retrieved_at ?? undefined,
+      }]
+    })
+  }
+  if (block.type === 'web_fetch_tool_result' && block.content.type === 'web_fetch_result') {
+    const result = block.content
+    return [{
+      url: result.url,
+      title: result.content.title ?? result.url,
+      siteName: getSiteName(result.url),
+      publishedAt: result.published_at,
+      snippet: null,
+      siteIcon: null,
+      index: result.citation_index ?? 1,
+      sourceId: result.source_id,
+      provider: result.provider,
+      isMock: result.is_mock,
+      retrievedAt: result.retrieved_at ?? undefined,
+      extraction: result.extraction,
+    }]
+  }
+  return []
+}
+
 export const ActivityPanel = ({ session }: { session: Session }) => {
+  const t = useTranslate()
   const apiKey = useSettings((state) => state.apiKey) ?? ''
   const [approvals, setApprovals] = useState<ApprovalRecord[]>([])
   const [recovery, setRecovery] = useState<RecoveryState | null>(null)
+  const [research, setResearch] = useState<ResearchStatus | null>(null)
   useEffect(() => {
     let active = true
     void Promise.all([listApprovals(apiKey), listRuns(apiKey)]).then(async ([items, runs]) => {
@@ -61,6 +119,15 @@ export const ActivityPanel = ({ session }: { session: Session }) => {
     })
     return () => { active = false }
   }, [apiKey, session.id])
+
+  useEffect(() => {
+    let active = true
+    void getResearchStatus(apiKey)
+      .then((status) => { if (active) { setResearch(status) } })
+      .catch(() => { if (active) { setResearch(null) } })
+    return () => { active = false }
+  }, [apiKey])
+
   const pendingApprovals = approvals.filter((approval) => approval.status === 'pending')
   const activities = useMemo(() => {
     const result: { message: AssistantMessage; block: ReplyBlock; label: string; detail: string }[] = []
@@ -78,6 +145,28 @@ export const ActivityPanel = ({ session }: { session: Session }) => {
     return result.slice(-12).reverse()
   }, [session.messages])
 
+  const researchSummary = useMemo(() => {
+    const urls = new Set<string>()
+    let pages = 0
+    let queries = 0
+    for (const message of session.messages) {
+      if (message.role !== 'assistant') { continue }
+      for (const block of message.blocks) {
+        if (block.type === 'server_tool_use' && block.name === 'deepseek_web_search') {
+          queries += 1
+        } else if (block.type === 'web_search_tool_result') {
+          for (const item of block.content) {
+            if (item.type === 'web_search_result') { urls.add(item.url) }
+          }
+        } else if (block.type === 'web_fetch_tool_result' && block.content.type === 'web_fetch_result') {
+          urls.add(block.content.url)
+          pages += 1
+        }
+      }
+    }
+    return { sources: urls.size, pages, queries }
+  }, [session.messages])
+
   const latestAssistant = [...session.messages].reverse().find((message): message is AssistantMessage => message.role === 'assistant')
 
   return (
@@ -85,7 +174,10 @@ export const ActivityPanel = ({ session }: { session: Session }) => {
       <div className={styles.header}>
         <div>
           <div className={styles.title}>Activity</div>
-          <div className={styles.subtitle}>Live tools and sources</div>
+          <div className={styles.subtitle}>
+            Live tools and sources
+            {research ? ` · ${research.isMock ? t('researchMockProvider') : research.displayName}` : ''}
+          </div>
         </div>
         <span className={styles.status} data-status={latestAssistant?.status ?? 'done'}>
           {latestAssistant?.status === 'streaming' ? 'Working' : latestAssistant?.status === 'error' ? 'Error' : 'Ready'}
@@ -125,16 +217,45 @@ export const ActivityPanel = ({ session }: { session: Session }) => {
         {activities.length === 0 ? (
           <div className={styles.empty}>Tool calls and research sources will appear here.</div>
         ) : (
-          activities.map(({ message, block, label, detail }) => (
-            <div className={styles.item} key={`${message.id}-${block.type}-${'id' in block ? block.id : 'result'}`}>
-              <div className={styles.itemTitle}>
-                <span className={styles.dot} data-kind={block.type === 'server_tool_use' ? 'tool' : 'result'} />
-                <span>{label}</span>
+          activities.map(({ message, block, label, detail }) => {
+            const sources = sourcesFromBlock(block)
+            const entry = `${message.id}-activity-${block.type}-${'id' in block ? block.id : 'result'}`
+            const clickable = sources.length > 0
+            return (
+              <div
+                className={styles.item}
+                key={`${message.id}-${block.type}-${'id' in block ? block.id : 'result'}`}
+                role={clickable ? 'button' : undefined}
+                tabIndex={clickable ? 0 : undefined}
+                onClick={clickable ? () => toggleSearchPanel(entry, sources) : undefined}
+                onKeyDown={clickable ? (event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    toggleSearchPanel(entry, sources)
+                  }
+                } : undefined}
+              >
+                <div className={styles.itemTitle}>
+                  <span className={styles.dot} data-kind={block.type === 'server_tool_use' ? 'tool' : 'result'} />
+                  <span>{label}</span>
+                </div>
+                <div className={styles.detail}>{detail}</div>
               </div>
-              <div className={styles.detail}>{detail}</div>
-            </div>
-          ))
+            )
+          })
         )}
+        {!latestAssistant || latestAssistant.status === 'done' ? (researchSummary.sources > 0) ? (
+          <div className={styles.item}>
+            <div className={styles.itemTitle}>
+              <span className={styles.dot} data-kind="result" />
+              <span>{t('researchComplete')}</span>
+            </div>
+            <div className={styles.detail}>
+              {t('researchPagesRead', { count: researchSummary.pages })} · {researchSummary.sources} sources
+              {researchSummary.queries ? ` · ${researchSummary.queries} searches` : ''}
+            </div>
+          </div>
+        ) : null : null}
       </div>
     </aside>
   )

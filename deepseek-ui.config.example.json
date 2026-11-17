@@ -16,9 +16,22 @@
   },
   "policy": {
     "rules": [
-      { "tool": "load_skill", "decision": "allow" }
+      { "tool": "load_skill", "decision": "allow" },
+      { "tool": "knowledge_search", "decision": "allow" },
+      { "tool": "web_search", "decision": "allow" },
+      { "tool": "web_fetch", "decision": "allow" },
+      { "tool": "web_extract", "decision": "allow" },
+      { "tool": "research_sources", "decision": "allow" },
+      { "tool": "artifact_create", "decision": "ask" },
+      { "tool": "artifact_update", "decision": "ask" }
     ],
     "default": "ask"
+  },
+  "research": {
+    "provider": "auto",
+    "maxResults": 8,
+    "maxPages": 5,
+    "respectRobots": true
   },
   "skills": ["./skills"]
 }

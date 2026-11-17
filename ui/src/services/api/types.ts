@@ -52,6 +52,9 @@ export type ServerToolUseBlock = {
   input: ServerToolInput
   caller: { type: 'direct' }
   kind: ServerToolKind
+  /** Local gateway research provider metadata. */
+  provider?: string
+  isMock?: boolean
 }
 
 export type WebSearchResult = {
@@ -70,6 +73,12 @@ export type WebSearchResult = {
   encrypted_content: string
   /** RFC 3339 UTC 时间，没有发布时间时为 null */
   page_age: string | null
+  /** Research source snapshot metadata from the local gateway. */
+  provider?: string
+  is_mock?: boolean
+  retrieved_at?: string | null
+  source_id?: string
+  citation_index?: number
 }
 
 export type WebSearchToolResultError = {
@@ -96,6 +105,13 @@ export type WebFetchResult = {
   }
   /** read_link 为网页解析出的原始日期字符串；deep_search 为 RFC 3339 */
   published_at: string | null
+  /** Local gateway research extraction metadata. */
+  extraction?: { ok: boolean; contentLength?: number; error?: string | null; canonicalUrl?: string }
+  provider?: string
+  is_mock?: boolean
+  retrieved_at?: string | null
+  source_id?: string
+  citation_index?: number
 }
 
 export type WebFetchToolResultError = {

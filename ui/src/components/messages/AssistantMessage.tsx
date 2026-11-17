@@ -128,13 +128,19 @@ export const AssistantMessage = memo(function AssistantMessage({
         <div
           className={clsx(styles.summary, panelEntry === summaryEntry && styles.summaryActive)}
           onClick={() => toggleSearchPanel(summaryEntry, view.searchResults)}
+          title={view.searchResults.every((source) => source.isMock) ? t('researchMockNotice') : undefined}
         >
           <SiteThumbnails sources={view.searchResults} />
           <span>
-            {t(
-              view.searchResults.length === 1 ? 'messageSearchSummary' : 'messageSearchSummaries',
-              { count: view.searchResults.length }
-            )}
+            {view.searchResults.every((source) => source.isMock)
+              ? t(
+                  view.searchResults.length === 1 ? 'researchMockSourcesOne' : 'researchMockSources',
+                  { count: view.searchResults.length }
+                )
+              : t(
+                  view.searchResults.length === 1 ? 'messageSearchSummary' : 'messageSearchSummaries',
+                  { count: view.searchResults.length }
+                )}
           </span>
         </div>
       ) : null}

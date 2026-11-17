@@ -227,3 +227,107 @@ execution, MCP OAuth, connector secrets, large-scale object storage, OCR
 for scanned PDFs/images, vector embeddings, reranking, and richer page-level
 previews are still required for the full production vision. The UI deliberately
 does not show unconfigured plugins/connectors as connected integrations.
+
+## Milestone 6 — web research engine (this run)
+
+### Delivered
+
+- **Provider-independent search.** `src/research/types.ts` defines
+  `SearchProvider`, pagination, limits, status, and typed `ResearchError`
+  codes. `src/research/search.ts` resolves `auto | mock | tavily`; `auto`
+  prefers Tavily when `TAVILY_API_KEY` is set and otherwise falls back to the
+  deterministic local fixture provider. Missing credentials are reported as
+  unavailable (`/research/status`, `degraded: true`) instead of silently
+  producing results.
+- **Safe page retrieval.** `src/research/url-safety.ts` rejects non-HTTP(S)
+  schemes, URL credentials, non-80/443 ports, localhost/internal names, and
+  private, loopback, link-local, CGNAT, multicast, reserved, documentation,
+  IPv4-mapped IPv6, and NAT64 destinations. DNS is resolved once, every answer
+  is checked, and one validated address is pinned for the socket. Redirects
+  are followed manually, revalidated per hop, limited to four hops, and
+  HTTPS-to-HTTP downgrades are refused. `src/research/fetcher.ts` caps response
+  size (2 MB) and time (15 s), accepts only HTML/XHTML/plain text, sends no
+  cookies or credentials, serializes per-host requests, and applies a cached
+  robots.txt policy for live retrieval.
+- **Extraction.** `src/research/extract.ts` removes scripts, styles, comments,
+  hidden elements, forms, and navigation before producing plain sanitized text
+  (no HTML reaches the model), plus title, site name, description, canonical
+  URL, and publication date from meta tags/time/JSON-LD. Malformed and
+  text/plain pages are handled.
+- **Agent tools.** `web_search`, `web_fetch`, `web_extract`, and
+  `research_sources` are registered as `read-only` builtin tools with a
+  per-run call budget. The gateway journals each call, writes durable
+  checkpoints, resumes completed read-only research calls without
+  re-execution, and enforces the existing approval policy. `research_sources`
+  with `action=run` executes the bounded workflow (query generation, search,
+  dedupe, ranking, fetch/extract, relevance, numeric-claim conflict detection,
+  extractive brief); `action=list` returns conversation sources.
+- **Citations and persistence.** `ResearchSourceRecord` snapshots are owner-
+  and conversation-scoped with stable citation indices; re-fetching a canonical
+  URL enriches the record without renumbering. Assistant answers cite
+  `[citation:N]`; citation chips, source cards, and the source panel resolve
+  only against persisted sources, and unknown markers are dropped by the
+  renderer. Artifacts accept `sourceIds`, validate them against the
+  conversation, and keep them in artifact metadata and each version.
+- **UI integration.** The gateway maps research results onto standard
+  Anthropic `server_tool_use`, `web_search_tool_result`, and
+  `web_fetch_tool_result` blocks, reusing the existing activity panel, reply
+  timeline, citation chips, and search side panel. The activity panel shows
+  queries, source counts, fetched pages, extraction status, and completion,
+  and now shows the configured provider. Clicking a source opens the extracted
+  text, publication/retrieval timestamps, and provider/mock badge inside the
+  conversation side panel. Mock results are labelled in tool payloads, SSE
+  metadata, source cards, and summaries. Artifacts show their linked sources.
+- **Endpoints.** `GET /research/status`, `GET /research/sources?conversationId`,
+  `GET /research/sources/:id`, `POST /research/search`,
+  `POST /research/run`; `/capabilities` now reports the research provider.
+
+### Tests
+
+- `test/research-core.test.ts` (17): URL/SSRF rejection including IPv4-mapped
+  IPv6, DNS answer validation, pinned address, redirect downgrade/private
+  target, redirect limit, size limit, timeout, robots.txt, content-type
+  rejection, extraction sanitization/injection stripping, malformed/plain
+  pages, mock determinism/pagination, Tavily mapping/error redaction, provider
+  resolution.
+- `test/research-engine.test.ts` (11): query generation, dedupe, bounded
+  concurrency, citation-stable persistence, extraction metadata, workflow
+  conflicts and bounds, provider failure handling, tool payloads and budget,
+  workflow tool, snapshot and artifact reference persistence across reloads.
+- `test/research-gateway.test.ts` (5): end-to-end SSE research run with
+  citation blocks and checkpoint/journal inspection, artifact approval with
+  source ids, checkpoint resume without re-execution, `research_sources run`
+  blocks, and unconfigured-provider honesty.
+
+Root `tsc --noEmit` passes; UI `tsc`, lint, and production Rspack build pass.
+Final validation ran 63/63 root tests (30 existing core tests plus 33 research
+tests). Tests were compiled with `tsc` and executed with `node` because this
+sandbox blocks the child-process pipes used by `tsx --test`; the test files
+themselves use `node:test` and run unchanged on a normal host via `npm test`.
+
+### Configuration
+
+- `TAVILY_API_KEY` enables live search; `RESEARCH_PROVIDER` may be `auto`
+  (default), `mock`, or `tavily`.
+- `deepseek-ui.config.json` may set
+  `research: { provider, apiKey, maxResults, maxPages, respectRobots }`.
+- Artifact tools default to `ask`; research tools are allowed as read-only in
+  the gateway default policy. A custom `policy` must include the research and
+  artifact rules it needs.
+- No paid credential is required for core tests or mock mode.
+
+### Commits
+
+`b35d381` research core, `7ab5a76` workflow and persistence, `f8168e4`
+agent/gateway integration, `10fcc41` UI surfaces, `360ef90` workflow
+visibility (branch `research-engine`). Docs and example configuration follow
+in a final documentation commit.
+
+### Remaining limitations
+
+Tavily and the local fixture provider are the only adapters. Live retrieval
+does not render JavaScript, parse PDFs/images, or crawl sites; robots.txt is
+best-effort; extraction is heuristic; workflow synthesis is extractive and its
+internal queries appear in the UI only after the run completes. There is no
+embedding reranker, site-level crawl queue, or cross-conversation source
+library. Mock mode is never internet search and is labelled as such.

@@ -276,24 +276,35 @@ const ToolRow = ({
   </div>
 )
 
-const PageLink = ({ page, failedTip }: { page: PageItem; failedTip?: string }) => (
-  <span
-    className={clsx(styles.page, page.status === 'failed' ? styles.pageFailed : styles.pageDone)}
-  >
-    {page.status === 'failed' ? (
-      <Tooltip content={failedTip}>
-        <span className={styles.pageText}>{page.title}</span>
-      </Tooltip>
-    ) : (
-      <a className={styles.pageText} href={page.url} target="_blank" rel="noreferrer">
-        {page.title}
-      </a>
-    )}
-    <span className={styles.pageIcon}>
-      <IconRightUpOutline14 />
+const PageLink = ({ page, failedTip }: { page: PageItem; failedTip?: string }) => {
+  const t = useTranslate()
+  return (
+    <span
+      className={clsx(styles.page, page.status === 'failed' ? styles.pageFailed : styles.pageDone)}
+    >
+      {page.status === 'failed' ? (
+        <Tooltip content={failedTip}>
+          <span className={styles.pageText}>{page.title}</span>
+        </Tooltip>
+      ) : (
+        <a className={styles.pageText} href={page.url} target="_blank" rel="noreferrer">
+          {page.title}
+        </a>
+      )}
+      {page.isMock ? <span className={styles.pageMeta}>{t('researchMockBadge')}</span> : null}
+      {page.extraction ? (
+        <span className={styles.pageMeta}>
+          {page.extraction.ok
+            ? t('researchExtracted', { count: page.extraction.chars ?? 0 })
+            : t('researchExtractFailed')}
+        </span>
+      ) : null}
+      <span className={styles.pageIcon}>
+        <IconRightUpOutline14 />
+      </span>
     </span>
-  </span>
-)
+  )
+}
 
 /** 边想边搜打开的网页：「浏览 N 个页面」+ 最多 5 个页面 */
 const OpenRow = ({

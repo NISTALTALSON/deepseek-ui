@@ -260,6 +260,13 @@
   display: flex;
 }
 
+.pageMeta {
+  flex-shrink: 0;
+  margin-left: 4px;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
 .pageDone .pageText {
   color: var(--dsw-alias-label-secondary);
 

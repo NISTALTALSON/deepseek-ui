@@ -2,6 +2,7 @@ import { translate } from '../../i18n/index.js'
 import type {
   ServerToolKind,
   TextCitation,
+  WebFetchResult,
   WebFetchToolResultBlock,
   WebSearchResult,
   WebSearchToolResultBlock,
@@ -25,6 +26,16 @@ export type Source = {
   siteIcon: string | null
   /** 引用角标与搜索结果列表上的编号，从 1 开始 */
   index: number
+  /** 本地研究网关持久化的来源 ID（可用于在会话内查看全文）。 */
+  sourceId?: string
+  /** 检索提供方，如 local-mock、tavily。 */
+  provider?: string
+  /** 结果为确定性本地夹具；必须如实标注。 */
+  isMock?: boolean
+  /** 实际抓取该来源的时间（RFC 3339）。 */
+  retrievedAt?: string
+  /** 正文抽取状态。 */
+  extraction?: { ok: boolean; chars?: number; error?: string | null }
 }
 
 export type ToolStatus = 'wip' | 'done' | 'failed'
@@ -50,6 +61,12 @@ export type PageItem = {
   url: string
   title: string
   status: ToolStatus
+  publishedAt?: string | null
+  provider?: string
+  isMock?: boolean
+  sourceId?: string
+  retrievedAt?: string
+  extraction?: { ok: boolean; chars?: number; error?: string | null }
 }
 
 export type OpenStep = { type: 'open'; pages: PageItem[] }
@@ -113,7 +130,10 @@ class SourceRegistry {
     url: string,
     title: string | null,
     publishedAt: string | null,
-    metadata?: Pick<WebSearchResult, 'snippet' | 'site_icon' | 'site_name'>
+    metadata?: Partial<Pick<WebSearchResult, 'snippet' | 'site_icon' | 'site_name'>> &
+      Partial<Pick<WebFetchResult, 'extraction' | 'provider' | 'is_mock' | 'retrieved_at' | 'source_id'>> & {
+        citation_index?: number
+      }
   ): Source {
     const siteName = metadata?.site_name?.trim() || getSiteName(url)
     const snippet = metadata?.snippet?.trim() || null
@@ -130,6 +150,11 @@ class SourceRegistry {
       existing.publishedAt ||= publishedAt
       existing.snippet ||= snippet
       existing.siteIcon ||= siteIcon
+      existing.sourceId ||= metadata?.source_id
+      existing.provider ||= metadata?.provider
+      existing.retrievedAt ||= metadata?.retrieved_at ?? undefined
+      existing.isMock ||= metadata?.is_mock
+      if (metadata?.extraction) { existing.extraction = metadata.extraction }
       return existing
     }
     const source: Source = {
@@ -140,6 +165,11 @@ class SourceRegistry {
       snippet,
       siteIcon,
       index: this.list.length + 1,
+      sourceId: metadata?.source_id,
+      provider: metadata?.provider,
+      isMock: metadata?.is_mock,
+      retrievedAt: metadata?.retrieved_at ?? undefined,
+      extraction: metadata?.extraction,
     }
     this.list.push(source)
     this.byUrl.set(url, source)
@@ -208,7 +238,7 @@ export const buildReplyView = (reply: AssistantMessage, streaming: boolean): Rep
       result.content.type === 'web_fetch_result' &&
       block.kind === 'deep_search'
     ) {
-      registry.add(result.content.url, result.content.content.title, result.content.published_at)
+      registry.add(result.content.url, result.content.content.title, result.content.published_at, result.content)
     }
   }
 
@@ -305,21 +335,34 @@ export const buildReplyView = (reply: AssistantMessage, streaming: boolean): Rep
     }
 
     const fetched = result?.type === 'web_fetch_tool_result' ? result.content : null
+    const fetchedResult = fetched?.type === 'web_fetch_result' ? fetched : null
     const page: PageItem = {
       id: block.id,
-      url: input.url || (fetched?.type === 'web_fetch_result' ? fetched.url : ''),
-      title: (fetched?.type === 'web_fetch_result' ? fetched.content.title : null) || input.url,
+      url: input.url || fetchedResult?.url || '',
+      title: fetchedResult?.content.title || input.url,
       status,
+      publishedAt: fetchedResult?.published_at ?? null,
+      provider: fetchedResult?.provider,
+      isMock: fetchedResult?.is_mock,
+      sourceId: fetchedResult?.source_id,
+      retrievedAt: fetchedResult?.retrieved_at ?? undefined,
+      extraction: fetchedResult?.extraction,
     }
     if (input.action === 'read_link') {
-      // 阅读链接仅展示进行态；成功、失败或中止后隐藏，原始结果仍保留用于后续请求。
-      if (status !== 'wip') {
+      // 进行中的阅读链接显示为读取态；研究工具抓取完成后保留为已读页面，
+      // 以便查看抽取状态与来源。
+      if (status === 'wip') {
+        if (last?.type === 'read_link') {
+          last.links.push(page)
+        } else {
+          steps.push({ type: 'read_link', links: [page] })
+        }
         return
       }
-      if (last?.type === 'read_link') {
-        last.links.push(page)
+      if (last?.type === 'open') {
+        last.pages.push(page)
       } else {
-        steps.push({ type: 'read_link', links: [page] })
+        steps.push({ type: 'open', pages: [page] })
       }
     } else if (input.action === 'open_page') {
       if (last?.type === 'open') {

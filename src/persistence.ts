@@ -1,6 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
+import type { ResearchSourceRecord } from "./research/types.js";
 import type { Message, ToolCall } from "./types.js";
 
 export type RunStatus = "queued" | "running" | "awaiting_approval" | "paused" | "completed" | "failed" | "cancelled" | "expired";
@@ -147,6 +148,8 @@ export type ArtifactVersionRecord = {
   createdAt: string;
   createdBy: "user" | "assistant" | "system";
   changeSummary?: string;
+  /** Research source ids that back this version, when the artifact was cited. */
+  sourceIds?: string[];
 };
 export type ArtifactRecord = {
   id: string;
@@ -282,12 +285,15 @@ export interface PersistenceAdapter {
   deleteFile(id: string, owner: string): Promise<boolean>;
   replaceKnowledgeChunks(fileId: string, owner: string, chunks: Omit<KnowledgeChunkRecord, "createdAt">[]): Promise<KnowledgeChunkRecord[]>;
   searchKnowledge(owner: string, query: string, projectId?: string, limit?: number): Promise<KnowledgeChunkRecord[]>;
-  createArtifact(input: Omit<ArtifactRecord, "id" | "createdAt" | "updatedAt" | "currentVersion" | "versions"> & { content: string; createdBy?: ArtifactVersionRecord["createdBy"]; changeSummary?: string }): Promise<ArtifactRecord>;
+  createArtifact(input: Omit<ArtifactRecord, "id" | "createdAt" | "updatedAt" | "currentVersion" | "versions"> & { content: string; createdBy?: ArtifactVersionRecord["createdBy"]; changeSummary?: string; sourceIds?: string[] }): Promise<ArtifactRecord>;
   listArtifacts(owner: string, options?: { conversationId?: string; projectId?: string }): Promise<ArtifactRecord[]>;
   getArtifact(id: string, owner: string): Promise<ArtifactRecord | undefined>;
-  updateArtifact(id: string, owner: string, input: { content: string; name?: string; kind?: ArtifactKind; language?: string; mimeType?: string; createdBy?: ArtifactVersionRecord["createdBy"]; changeSummary?: string }): Promise<ArtifactRecord | undefined>;
+  updateArtifact(id: string, owner: string, input: { content: string; name?: string; kind?: ArtifactKind; language?: string; mimeType?: string; createdBy?: ArtifactVersionRecord["createdBy"]; changeSummary?: string; sourceIds?: string[] }): Promise<ArtifactRecord | undefined>;
   restoreArtifactVersion(id: string, owner: string, version: number, createdBy?: ArtifactVersionRecord["createdBy"]): Promise<ArtifactRecord | undefined>;
   deleteArtifact(id: string, owner: string): Promise<boolean>;
+  saveResearchSource(input: ResearchSourceRecord): Promise<ResearchSourceRecord>;
+  listResearchSources(owner: string, conversationId: string): Promise<ResearchSourceRecord[]>;
+  getResearchSource(id: string, owner: string): Promise<ResearchSourceRecord | undefined>;
   createAgent(input: Pick<AgentRecord, "owner" | "name"> & Partial<AgentRecord>): Promise<AgentRecord>;
   listAgents(owner: string, includeDisabled?: boolean): Promise<AgentRecord[]>;
   getAgent(id: string, owner: string): Promise<AgentRecord | undefined>;
@@ -330,11 +336,12 @@ type StoreData = {
   credentials: CredentialRecord[];
   oauthTransactions: OAuthTransactionRecord[];
   checkpoints: ExecutionCheckpoint[];
+  researchSources: ResearchSourceRecord[];
 };
 
 const emptyData = (): StoreData => ({
   conversations: [], messages: [], runs: [], events: [], toolExecutions: [],
-  approvals: [], projects: [], memories: [], artifacts: [], files: [], knowledgeChunks: [], agents: [], integrations: [], checkpoints: [], credentials: [], oauthTransactions: [],
+  approvals: [], projects: [], memories: [], artifacts: [], files: [], knowledgeChunks: [], agents: [], integrations: [], checkpoints: [], credentials: [], oauthTransactions: [], researchSources: [],
 });
 
 const locks = new Map<string, Promise<void>>();
@@ -687,7 +694,7 @@ export class WorkspaceStore implements PersistenceAdapter {
       .map((item) => item.chunk);
   }
 
-  async createArtifact(input: Omit<ArtifactRecord, "id" | "createdAt" | "updatedAt" | "currentVersion" | "versions"> & { content: string; createdBy?: ArtifactVersionRecord["createdBy"]; changeSummary?: string }): Promise<ArtifactRecord> {
+  async createArtifact(input: Omit<ArtifactRecord, "id" | "createdAt" | "updatedAt" | "currentVersion" | "versions"> & { content: string; createdBy?: ArtifactVersionRecord["createdBy"]; changeSummary?: string; sourceIds?: string[] }): Promise<ArtifactRecord> {
     return this.mutate(() => {
       const now = new Date().toISOString();
       const version: ArtifactVersionRecord = {
@@ -698,6 +705,7 @@ export class WorkspaceStore implements PersistenceAdapter {
         createdAt: now,
         createdBy: input.createdBy ?? "user",
         changeSummary: input.changeSummary,
+        ...(input.sourceIds?.length ? { sourceIds: [...new Set(input.sourceIds)] } : {}),
       };
       const artifact: ArtifactRecord = {
         id: randomUUID(),
@@ -733,7 +741,7 @@ export class WorkspaceStore implements PersistenceAdapter {
     return this.data.artifacts.find((artifact) => artifact.id === id && artifact.owner === owner);
   }
 
-  async updateArtifact(id: string, owner: string, input: { content: string; name?: string; kind?: ArtifactKind; language?: string; mimeType?: string; createdBy?: ArtifactVersionRecord["createdBy"]; changeSummary?: string }): Promise<ArtifactRecord | undefined> {
+  async updateArtifact(id: string, owner: string, input: { content: string; name?: string; kind?: ArtifactKind; language?: string; mimeType?: string; createdBy?: ArtifactVersionRecord["createdBy"]; changeSummary?: string; sourceIds?: string[] }): Promise<ArtifactRecord | undefined> {
     return this.mutate(() => {
       const artifact = this.data.artifacts.find((item) => item.id === id && item.owner === owner);
       if (!artifact) return undefined;
@@ -746,6 +754,7 @@ export class WorkspaceStore implements PersistenceAdapter {
         createdAt: now,
         createdBy: input.createdBy ?? "user",
         changeSummary: input.changeSummary,
+        ...(input.sourceIds?.length ? { sourceIds: [...new Set(input.sourceIds)] } : {}),
       };
       artifact.versions.push(version);
       artifact.currentVersion = version.version;
@@ -754,6 +763,7 @@ export class WorkspaceStore implements PersistenceAdapter {
       if (input.kind !== undefined) artifact.kind = input.kind;
       if (input.language !== undefined) artifact.language = input.language;
       if (input.mimeType !== undefined) artifact.mimeType = input.mimeType;
+      if (input.sourceIds?.length) artifact.metadata = { ...artifact.metadata, sourceIds: [...new Set(input.sourceIds)] };
       return artifact;
     });
   }
@@ -786,6 +796,56 @@ export class WorkspaceStore implements PersistenceAdapter {
       this.data.artifacts = this.data.artifacts.filter((artifact) => !(artifact.id === id && artifact.owner === owner));
       return this.data.artifacts.length !== before;
     });
+  }
+
+  private static sourceStatusRank(status: ResearchSourceRecord["status"]): number {
+    return status === "extracted" ? 3 : status === "fetched" ? 2 : status === "search" ? 1 : 0;
+  }
+
+  /**
+   * Upserts a source snapshot. The citation index and id are stable for a
+   * conversation/canonical URL pair so a later fetch enriches a previously
+   * discovered source instead of renumbering citations.
+   */
+  async saveResearchSource(input: ResearchSourceRecord): Promise<ResearchSourceRecord> {
+    return this.mutate(() => {
+      const existing = this.data.researchSources.find(
+        (source) => source.owner === input.owner && source.conversationId === input.conversationId && source.canonicalUrl === input.canonicalUrl,
+      );
+      if (existing) {
+        const status = WorkspaceStore.sourceStatusRank(input.status) >= WorkspaceStore.sourceStatusRank(existing.status)
+          ? input.status
+          : existing.status;
+        Object.assign(existing, {
+          ...input,
+          id: existing.id,
+          citationIndex: existing.citationIndex,
+          title: input.title || existing.title,
+          snippet: input.snippet || existing.snippet,
+          content: input.content || existing.content,
+          excerpt: input.excerpt || existing.excerpt,
+          publishedAt: input.publishedAt ?? existing.publishedAt,
+          error: input.error,
+          metadata: { ...existing.metadata, ...input.metadata },
+          status,
+        });
+        return existing;
+      }
+      this.data.researchSources.push(input);
+      return input;
+    });
+  }
+
+  async listResearchSources(owner: string, conversationId: string): Promise<ResearchSourceRecord[]> {
+    await this.load();
+    return this.data.researchSources
+      .filter((source) => source.owner === owner && source.conversationId === conversationId)
+      .sort((a, b) => a.citationIndex - b.citationIndex || a.retrievedAt.localeCompare(b.retrievedAt));
+  }
+
+  async getResearchSource(id: string, owner: string): Promise<ResearchSourceRecord | undefined> {
+    await this.load();
+    return this.data.researchSources.find((source) => source.id === id && source.owner === owner);
   }
 
   async createAgent(input: Pick<AgentRecord, "owner" | "name"> & Partial<AgentRecord>): Promise<AgentRecord> {
