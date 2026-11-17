@@ -499,52 +499,72 @@ test("agent reconstructs from checkpoint messages and continues after a committe
     ],
   });
 
-  test("connector credentials are encrypted and OAuth state is one-time and owner-scoped", async () => {
-    const encrypted = encryptCredential({ accessToken: "secret-token", refreshToken: "refresh-token" }, "test-master-key");
-    assert.notEqual(encrypted.ciphertext, JSON.stringify({ accessToken: "secret-token", refreshToken: "refresh-token" }));
-    assert.deepEqual(decryptCredential(encrypted, "test-master-key"), { accessToken: "secret-token", refreshToken: "refresh-token" });
-    assert.throws(() => decryptCredential(encrypted, "wrong-key"));
-
-    const store = new WorkspaceStore(join(await mkdtemp(join(tmpdir(), "deepseek-ui-")), "workspace.json"));
-    const transaction = createOAuthTransaction("github", "alice", "https://example.test/oauth/callback", "verifier", ["read:user"]);
-    await store.createOAuthTransaction(transaction);
-    assert.equal(await store.consumeOAuthTransaction(transaction.state, "bob"), undefined);
-    assert.ok(await store.consumeOAuthTransaction(transaction.state, "alice"));
-    assert.equal(await store.consumeOAuthTransaction(transaction.state, "alice"), undefined);
-  });
-
-  test("connector tool metadata is explicit and read-only by default", () => {
-    const specs = connectorToolSpecs(new Set(["github"]));
-    assert.ok(specs.some((spec) => spec.name === "connector__github__github__list_repositories" && spec.readOnly));
-    assert.ok(specs.some((spec) => spec.name === "connector__github__github__create_issue" && !spec.readOnly && spec.permissionClass === "external-side-effect"));
-  });
-
-  test("artifacts persist immutable versions, restore safely, and isolate owners", async () => {
-    const file = join(await mkdtemp(join(tmpdir(), "deepseek-ui-artifacts-")), "workspace.json");
-    const store = new WorkspaceStore(file);
-    const artifact = await store.createArtifact({
-      owner: "alice",
-      name: "notes.md",
-      kind: "markdown",
-      mimeType: "text/markdown",
-      content: "# One",
-      metadata: {},
-    });
-    const updated = await store.updateArtifact(artifact.id, "alice", { content: "# Two", changeSummary: "Edit" });
-    assert.equal(updated?.currentVersion, 2);
-    assert.equal(updated?.versions.length, 2);
-    assert.equal((await store.getArtifact(artifact.id, "bob")), undefined);
-    const restored = await store.restoreArtifactVersion(artifact.id, "alice", 1);
-    assert.equal(restored?.currentVersion, 3);
-    assert.equal(restored?.versions.at(-1)?.content, "# One");
-    const reloaded = new WorkspaceStore(file);
-    assert.equal((await reloaded.getArtifact(artifact.id, "alice"))?.versions.length, 3);
-    assert.equal(await reloaded.deleteArtifact(artifact.id, "bob"), false);
-    assert.equal(await reloaded.deleteArtifact(artifact.id, "alice"), true);
-  });
   const events = [];
   for await (const event of agent.resumeAfterTool(toolCall, "committed result")) events.push(event);
   assert.equal(events.at(-1)?.type, "done");
   assert.equal(agent.messages.filter((message) => message.role === "tool").length, 1);
   assert.equal(agent.messages.filter((message) => message.role === "assistant").length, 2);
+});
+
+test("connector credentials are encrypted and OAuth state is one-time and owner-scoped", async () => {
+  const encrypted = encryptCredential({ accessToken: "secret-token", refreshToken: "refresh-token" }, "test-master-key");
+  assert.notEqual(encrypted.ciphertext, JSON.stringify({ accessToken: "secret-token", refreshToken: "refresh-token" }));
+  assert.deepEqual(decryptCredential(encrypted, "test-master-key"), { accessToken: "secret-token", refreshToken: "refresh-token" });
+  assert.throws(() => decryptCredential(encrypted, "wrong-key"));
+  const store = new WorkspaceStore(join(await mkdtemp(join(tmpdir(), "deepseek-ui-")), "workspace.json"));
+  const transaction = createOAuthTransaction("github", "alice", "https://example.test/oauth/callback", "verifier", ["read:user"]);
+  await store.createOAuthTransaction(transaction);
+  assert.equal(await store.consumeOAuthTransaction(transaction.state, "bob"), undefined);
+  assert.ok(await store.consumeOAuthTransaction(transaction.state, "alice"));
+  assert.equal(await store.consumeOAuthTransaction(transaction.state, "alice"), undefined);
+});
+
+test("connector tool metadata is explicit and read-only by default", () => {
+  const specs = connectorToolSpecs(new Set(["github"]));
+  assert.ok(specs.some((spec) => spec.name === "connector__github__github__list_repositories" && spec.readOnly));
+  assert.ok(specs.some((spec) => spec.name === "connector__github__github__create_issue" && !spec.readOnly && spec.permissionClass === "external-side-effect"));
+});
+
+test("artifacts persist immutable versions, restore safely, and isolate owners", async () => {
+  const file = join(await mkdtemp(join(tmpdir(), "deepseek-ui-artifacts-")), "workspace.json");
+  const store = new WorkspaceStore(file);
+  const artifact = await store.createArtifact({ owner: "alice", name: "notes.md", kind: "markdown", mimeType: "text/markdown", content: "# One", metadata: {} });
+  const updated = await store.updateArtifact(artifact.id, "alice", { content: "# Two", changeSummary: "Edit" });
+  assert.equal(updated?.currentVersion, 2);
+  assert.equal(updated?.versions.length, 2);
+  assert.equal((await store.getArtifact(artifact.id, "bob")), undefined);
+  const restored = await store.restoreArtifactVersion(artifact.id, "alice", 1);
+  assert.equal(restored?.currentVersion, 3);
+  assert.equal(restored?.versions.at(-1)?.content, "# One");
+  const reloaded = new WorkspaceStore(file);
+  assert.equal((await reloaded.getArtifact(artifact.id, "alice"))?.versions.length, 3);
+  assert.equal(await reloaded.deleteArtifact(artifact.id, "bob"), false);
+  assert.equal(await reloaded.deleteArtifact(artifact.id, "alice"), true);
+});
+
+test("agent artifact tools create and update persistent versions through the runtime", async () => {
+  const file = join(await mkdtemp(join(tmpdir(), "deepseek-ui-agent-artifacts-")), "workspace.json");
+  const store = new WorkspaceStore(file);
+  const agent = new Agent({
+    client: new MockProvider(),
+    mcp: new McpHub(),
+    skills: new SkillRegistry(),
+    permissions: new Permissions({ default: "allow", rules: [] }, async () => true),
+    artifactExecute: async (name, args, callId) => {
+      if (name === "artifact_create") {
+        const artifact = await store.createArtifact({
+          owner: "alice", conversationId: "conversation-1", name: String(args.name),
+          kind: "markdown", mimeType: "text/markdown", content: String(args.content),
+          metadata: { executionId: callId }, createdBy: "assistant",
+        });
+        return JSON.stringify({ artifactId: artifact.id, version: artifact.currentVersion });
+      }
+      const artifact = await store.getArtifact(String(args.artifactId), "alice");
+      const updated = artifact && await store.updateArtifact(artifact.id, "alice", { content: String(args.content), createdBy: "assistant" });
+      return JSON.stringify({ artifactId: updated?.id, version: updated?.currentVersion });
+    },
+  });
+  const created = JSON.parse(JSON.parse(await agent.executeApprovedCall({ id: "call-create", type: "function", function: { name: "artifact_create", arguments: JSON.stringify({ name: "plan.md", kind: "markdown", content: "# Plan" }) } })).content);
+  const updated = JSON.parse(JSON.parse(await agent.executeApprovedCall({ id: "call-update", type: "function", function: { name: "artifact_update", arguments: JSON.stringify({ artifactId: created.artifactId, content: "# Updated" }) } })).content);
+  assert.equal(updated.version, 2);
 });

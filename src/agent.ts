@@ -79,6 +79,7 @@ export interface AgentDeps {
   initialMessages?: Message[];
   enabledConnectors?: ReadonlySet<string>;
   connectorExecute?: (name: string, args: Record<string, unknown>, signal?: AbortSignal) => Promise<string>;
+  artifactExecute?: (name: string, args: Record<string, unknown>, callId: string, signal?: AbortSignal) => Promise<string>;
 }
 
 const messageChars = (message: Message): number => JSON.stringify(message).length;
@@ -146,6 +147,41 @@ export class Agent {
       });
     }
     t.push(...connectorToolSpecs(this.d.enabledConnectors));
+    if (this.d.artifactExecute) {
+      t.push(
+        {
+          name: "artifact_create",
+          displayName: "Create artifact",
+          source: "builtin",
+          description: "Create a persistent artifact in the current conversation. Use for markdown, code, HTML, Mermaid, JSON, structured data, or plain text.",
+          parameters: {
+            type: "object",
+            properties: {
+              name: { type: "string", minLength: 1 },
+              kind: { type: "string", enum: ["markdown", "code", "html", "mermaid", "json", "data", "text"] },
+              content: { type: "string" },
+              language: { type: "string" },
+            },
+            required: ["name", "kind", "content"],
+            additionalProperties: false,
+          },
+          permissionClass: "external-side-effect",
+        },
+        {
+          name: "artifact_update",
+          displayName: "Update artifact",
+          source: "builtin",
+          description: "Create a new immutable version of an existing persistent artifact.",
+          parameters: {
+            type: "object",
+            properties: { artifactId: { type: "string" }, content: { type: "string" } },
+            required: ["artifactId", "content"],
+            additionalProperties: false,
+          },
+          permissionClass: "external-side-effect",
+        },
+      );
+    }
     return this.d.allowedTools
       ? t.filter((tool) => this.d.allowedTools!.has(tool.name))
       : t;
@@ -181,6 +217,8 @@ export class Agent {
         out = await this.d.knowledgeSearch((args as { query: string }).query);
       } else if (name.startsWith("connector__") && this.d.connectorExecute) {
         out = await this.d.connectorExecute(name, args as Record<string, unknown>, signal);
+      } else if (name.startsWith("artifact_") && this.d.artifactExecute) {
+        out = await this.d.artifactExecute(name, args as Record<string, unknown>, call.id, signal);
       } else if (this.d.mcp.owns(name)) {
         out = await this.d.mcp.call(name, args, signal);
       } else {
@@ -191,7 +229,7 @@ export class Agent {
     }
     const max = this.d.maxToolOutputChars ?? 50_000;
     const bounded = out.length > max ? `${out.slice(0, max)}\n...[truncated ${out.length - max} chars]` : out;
-    return untrustedObservation(name.startsWith("load_skill") ? "skill" : "mcp", bounded);
+    return untrustedObservation(name.startsWith("load_skill") ? "skill" : name.startsWith("artifact_") ? "artifact" : "mcp", bounded);
   }
 
   private async *continueRun(signal?: AbortSignal): AsyncGenerator<AgentEvent> {
@@ -231,6 +269,8 @@ export class Agent {
               ? Boolean(this.d.knowledgeSearch)
             : name.startsWith("connector__")
               ? Boolean(this.d.enabledConnectors?.has(name.split("__", 2)[1]))
+            : name.startsWith("artifact_")
+              ? Boolean(this.d.artifactExecute)
             : this.d.enabledMcpServers?.has(name.split("__", 1)[0]) ?? false;
         const spec = this.toolSpec(name);
         const policy = this.d.permissions.decide(name);

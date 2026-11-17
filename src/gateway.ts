@@ -231,6 +231,7 @@ export const createGateway = async (config: GatewayConfig = {}) => {
         const config = checkpoint.agentConfig;
         const controller = new AbortController();
         activeRuns.set(runId, controller);
+        const conversationId = checkpoint.conversationId;
         const projectId = typeof config.projectId === "string" ? config.projectId : undefined;
         const enabledConnectorIds = new Set(Array.isArray(config.enabledConnectors) ? config.enabledConnectors.filter((value): value is string => typeof value === "string") : []);
         const agent = new Agent({
@@ -256,6 +257,33 @@ export const createGateway = async (config: GatewayConfig = {}) => {
             const credential = await store.getCredential(integration.id, owner);
             if (!credential) throw new Error("Connector credential is unavailable");
             return executeConnectorOperation(name, args, { connectorId, owner, config: integration.config, credential: decryptCredential(credential.encrypted, process.env.CREDENTIAL_ENCRYPTION_KEY ?? "") });
+          },
+          artifactExecute: async (name, args, callId) => {
+            const existing = (await store.listArtifacts(owner, { conversationId })).find((artifact) => artifact.metadata.executionId === callId);
+            if (existing) return JSON.stringify({ artifactId: existing.id, version: existing.currentVersion, name: existing.name, reused: true });
+            if (name === "artifact_create") {
+              const kind = ["markdown", "code", "html", "mermaid", "json", "data", "text"].includes(String(args.kind)) ? String(args.kind) as ArtifactKind : "text";
+              const artifact = await store.createArtifact({
+                owner, conversationId, projectId,
+                name: String(args.name),
+                kind,
+                language: typeof args.language === "string" ? args.language : undefined,
+                mimeType: kind === "html" ? "text/html" : kind === "markdown" ? "text/markdown" : kind === "json" || kind === "data" ? "application/json" : "text/plain",
+                metadata: { executionId: callId },
+                content: String(args.content),
+                createdBy: "assistant",
+                changeSummary: "Created by assistant",
+              });
+              return JSON.stringify({ artifactId: artifact.id, version: artifact.currentVersion, name: artifact.name });
+            }
+            if (name === "artifact_update") {
+              const artifact = await store.getArtifact(String(args.artifactId), owner);
+              if (!artifact || (artifact.conversationId !== conversationId && artifact.projectId !== projectId)) throw new Error("Artifact is not accessible in this conversation or project");
+              const updated = await store.updateArtifact(artifact.id, owner, { content: String(args.content), createdBy: "assistant", changeSummary: "Updated by assistant" });
+              if (!updated) throw new Error("Artifact not found");
+              return JSON.stringify({ artifactId: updated.id, version: updated.currentVersion, name: updated.name });
+            }
+            throw new Error(`Unsupported artifact operation: ${name}`);
           },
           allowedTools: new Set(Array.isArray(config.allowedTools) ? config.allowedTools.filter((value): value is string => typeof value === "string") : []),
           projectInstructions: projectId ? (await store.getProject(projectId, owner))?.instructions : undefined,
