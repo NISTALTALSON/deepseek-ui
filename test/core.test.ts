@@ -108,6 +108,62 @@ test("workspace conversation listing isolates owners", async () => {
   assert.deepEqual((await store.listConversations("a")).map((conversation) => conversation.id), ["owner-a"]);
 });
 
+test("agent persistence versions updates and isolates owners", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "deepseek-ui-agents-"));
+  try {
+    const store = new WorkspaceStore(join(directory, "workspace.json"));
+    const agent = await store.createAgent({
+      owner: "alice",
+      name: "Researcher",
+      provider: "mock",
+      model: "mock",
+      instructions: "Use concise evidence.",
+      skillNames: ["research"],
+      allowedTools: ["knowledge_search"],
+    });
+    const updated = await store.updateAgent(agent.id, "alice", { description: "Updated" });
+    assert.equal(updated?.version, 2);
+    assert.equal(updated?.versions.length, 1);
+    assert.equal((await store.listAgents("bob")).length, 0);
+    assert.equal((await store.getAgent(agent.id, "bob")), undefined);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("gateway creates owner-scoped agents and executes selected agent configuration", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "deepseek-ui-gateway-agents-"));
+  const gateway = await createGateway({ provider: "mock", dataFile: join(directory, "workspace.json") });
+  await new Promise<void>((resolve) => gateway.server.listen(0, "127.0.0.1", resolve));
+  const address = gateway.server.address();
+  const base = `http://127.0.0.1:${typeof address === "object" && address ? address.port : 0}`;
+  try {
+    const created = await fetch(`${base}/agents`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-deepseek-ui-workspace": "alice" },
+      body: JSON.stringify({ name: "Offline helper", provider: "mock", model: "mock", instructions: "Always say configured.", allowedTools: [] }),
+    });
+    assert.equal(created.status, 201);
+    const agent = (await created.json() as { agent: { id: string; version: number } }).agent;
+    assert.equal(agent.version, 1);
+    assert.equal((await fetch(`${base}/agents/${agent.id}`, { headers: { "x-deepseek-ui-workspace": "bob" } })).status, 404);
+    const response = await fetch(`${base}/anthropic/v1/messages`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-deepseek-ui-workspace": "alice",
+        "x-deepseek-ui-agent": agent.id,
+      },
+      body: JSON.stringify({ model: "mock", messages: [{ role: "user", content: "run configured agent" }] }),
+    });
+    assert.equal(response.status, 200);
+    assert.match(await response.text(), /run configured agent/);
+  } finally {
+    await gateway.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("projects, files, extraction, and keyword knowledge stay owner and project scoped", async () => {
   const directory = await mkdtemp(join(tmpdir(), "deepseek-ui-projects-"));
   const store = new WorkspaceStore(join(directory, "workspace.json"));

@@ -34,6 +34,7 @@ import { Spectrum } from './Spectrum.js'
 import { useTranslate } from '../../i18n/index.js'
 import { openWorkspace, useWorkspace } from '../../services/workspace.js'
 import styles from './ChatInput.module.css'
+import { selectAgent, useAgents } from '../../services/agents.js'
 
 /** 输入框：自适应高度的文本框 + 文件 + 深度思考与智能搜索开关 + 语音输入 + 发送 / 停止 */
 export const ChatInput = memo(function ChatInput({ sessionId }: { sessionId: string | null }) {
@@ -56,6 +57,8 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
   const search = useSettings((state) => state.search)
   const enabledSkills = useWorkspace((state) => state.enabledSkills)
   const enabledIntegrations = useWorkspace((state) => state.integrations.filter((item) => item.enabled))
+  const agents = useAgents((state) => state.agents.filter((agent) => agent.enabled))
+  const selectedAgentId = useAgents((state) => state.selectedAgentId)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const togglesRef = useRef<HTMLDivElement>(null)
@@ -206,6 +209,13 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
       <div className={styles.functionRow}>
         {/* 深度思考 / 智能搜索开关，tooltip 在按钮上方 */}
         <div ref={togglesRef} className={styles.toggles}>
+          <label className={styles.toggle}>
+            <span className={styles.toggleLabel}>Agent</span>
+            <select aria-label="Select agent" value={selectedAgentId ?? ''} onChange={(event) => selectAgent(event.target.value || undefined)}>
+              <option value="">Normal chat</option>
+              {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name} · {agent.model}</option>)}
+            </select>
+          </label>
           <Tooltip content="Configure skills, plugins, MCP servers, and connectors">
             <button
               type="button"

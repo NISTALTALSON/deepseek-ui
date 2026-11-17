@@ -6,7 +6,7 @@ import { createProvider } from "./provider.js";
 import { McpHub, type McpConfig } from "./mcp.js";
 import { Permissions, defaultPolicy, type PolicyConfig } from "./permissions.js";
 import { SkillRegistry } from "./skills.js";
-import { WorkspaceStore } from "./persistence.js";
+import { WorkspaceStore, type AgentRecord } from "./persistence.js";
 import { FileStorage, MAX_FILE_BYTES, processFile, validateUpload } from "./knowledge.js";
 import type { AssistantMessage, Message } from "./types.js";
 
@@ -33,6 +33,7 @@ export type GatewayCapabilities = {
   mcpServers: string[];
   tools: number;
   providers: Array<{ id: string; name: string; configured: boolean }>;
+  toolsList?: Array<{ name: string; description: string; readOnly?: boolean; timeoutMs?: number }>;
 };
 
 type AnthropicContent =
@@ -193,7 +194,7 @@ export const createGateway = async (config: GatewayConfig = {}) => {
     }
     res.setHeader(
       "access-control-allow-headers",
-      "content-type, authorization, x-api-key, anthropic-beta, x-deepseek-ui-skills, x-deepseek-ui-integrations, x-deepseek-ui-provider, x-deepseek-ui-workspace, x-deepseek-ui-project, x-project-id, x-conversation-id, x-file-name",
+      "content-type, authorization, x-api-key, anthropic-beta, x-deepseek-ui-agent, x-deepseek-ui-skills, x-deepseek-ui-integrations, x-deepseek-ui-provider, x-deepseek-ui-workspace, x-deepseek-ui-project, x-project-id, x-conversation-id, x-file-name",
     );
     res.setHeader("access-control-allow-methods", "GET, POST, DELETE, OPTIONS");
     if (req.method === "OPTIONS") {
@@ -212,6 +213,9 @@ export const createGateway = async (config: GatewayConfig = {}) => {
           { id: "deepseek", name: "DeepSeek", configured: Boolean(upstreamKey) },
           { id: "mock", name: "Local mock", configured: true },
         ],
+        toolsList: mcp.tools().map((tool) => ({
+          name: tool.name, description: tool.description, readOnly: tool.readOnly, timeoutMs: tool.timeoutMs,
+        })),
       };
       json(res, 200, capabilities);
       return;
@@ -230,8 +234,77 @@ export const createGateway = async (config: GatewayConfig = {}) => {
       json(res, 401, { error: { message: "Missing API key", type: "authentication_error" } });
       return;
     }
-
     const requestUrl = new URL(req.url ?? "/", "http://localhost");
+
+    if (requestUrl.pathname === "/agents" && req.method === "GET") {
+      json(res, 200, { agents: await store.listAgents(owner, requestUrl.searchParams.get("includeDisabled") === "true") });
+      return;
+    }
+    if (requestUrl.pathname === "/agents" && req.method === "POST") {
+      try {
+        const body = JSON.parse((await readLimitedBody(req, cfg.maxRequestBytes ?? 2_000_000)).toString("utf8")) as Partial<AgentRecord>;
+        if (typeof body.name !== "string" || !body.name.trim()) throw new Error("Agent name is required");
+        const agent = await store.createAgent({
+          owner,
+          name: body.name,
+          description: typeof body.description === "string" ? body.description : "",
+          avatar: typeof body.avatar === "string" ? body.avatar : undefined,
+          instructions: typeof body.instructions === "string" ? body.instructions : "",
+          provider: body.provider === "deepseek" ? "deepseek" : "mock",
+          model: typeof body.model === "string" ? body.model : "mock",
+          parameters: body.parameters && typeof body.parameters === "object" ? body.parameters : {},
+          skillNames: Array.isArray(body.skillNames) ? body.skillNames.filter((item): item is string => typeof item === "string") : [],
+          allowedTools: Array.isArray(body.allowedTools) ? body.allowedTools.filter((item): item is string => typeof item === "string") : [],
+          projectIds: Array.isArray(body.projectIds) ? body.projectIds.filter((item): item is string => typeof item === "string") : [],
+          memoryEnabled: body.memoryEnabled !== false,
+          welcomeMessage: typeof body.welcomeMessage === "string" ? body.welcomeMessage : "",
+          examplePrompts: Array.isArray(body.examplePrompts) ? body.examplePrompts.filter((item): item is string => typeof item === "string") : [],
+          enabled: body.enabled !== false,
+        });
+        json(res, 201, { agent });
+      } catch (error) {
+        json(res, 400, { error: { message: error instanceof Error ? error.message : String(error) } });
+      }
+      return;
+    }
+    const agentMatch = requestUrl.pathname.match(/^\/agents\/([^/]+)$/);
+    if (agentMatch && req.method === "GET") {
+      const agent = await store.getAgent(agentMatch[1], owner);
+      json(res, agent ? 200 : 404, agent ? { agent } : { error: { message: "Agent not found" } });
+      return;
+    }
+    if (agentMatch && req.method === "PATCH") {
+      try {
+        const body = JSON.parse((await readLimitedBody(req, cfg.maxRequestBytes ?? 2_000_000)).toString("utf8")) as Partial<AgentRecord>;
+        const patch: Partial<AgentRecord> = {
+          ...(typeof body.name === "string" ? { name: body.name.trim() } : {}),
+          ...(typeof body.description === "string" ? { description: body.description } : {}),
+          ...(typeof body.avatar === "string" ? { avatar: body.avatar } : {}),
+          ...(typeof body.instructions === "string" ? { instructions: body.instructions } : {}),
+          ...(body.provider === "deepseek" || body.provider === "mock" ? { provider: body.provider } : {}),
+          ...(typeof body.model === "string" ? { model: body.model } : {}),
+          ...(body.parameters && typeof body.parameters === "object" ? { parameters: body.parameters } : {}),
+          ...(Array.isArray(body.skillNames) ? { skillNames: body.skillNames.filter((item): item is string => typeof item === "string") } : {}),
+          ...(Array.isArray(body.allowedTools) ? { allowedTools: body.allowedTools.filter((item): item is string => typeof item === "string") } : {}),
+          ...(Array.isArray(body.projectIds) ? { projectIds: body.projectIds.filter((item): item is string => typeof item === "string") } : {}),
+          ...(typeof body.memoryEnabled === "boolean" ? { memoryEnabled: body.memoryEnabled } : {}),
+          ...(typeof body.welcomeMessage === "string" ? { welcomeMessage: body.welcomeMessage } : {}),
+          ...(Array.isArray(body.examplePrompts) ? { examplePrompts: body.examplePrompts.filter((item): item is string => typeof item === "string") } : {}),
+          ...(typeof body.enabled === "boolean" ? { enabled: body.enabled } : {}),
+        };
+        const agent = await store.updateAgent(agentMatch[1], owner, patch);
+        json(res, agent ? 200 : 404, agent ? { agent } : { error: { message: "Agent not found" } });
+      } catch (error) {
+        json(res, 400, { error: { message: error instanceof Error ? error.message : String(error) } });
+      }
+      return;
+    }
+    if (agentMatch && req.method === "DELETE") {
+      const deleted = await store.deleteAgent(agentMatch[1], owner);
+      json(res, deleted ? 200 : 404, deleted ? { ok: true } : { error: { message: "Agent not found" } });
+      return;
+    }
+
     if (requestUrl.pathname === "/projects" && req.method === "GET") {
       json(res, 200, { projects: await store.listProjects(owner, requestUrl.searchParams.get("includeArchived") === "true") });
       return;
@@ -447,16 +520,29 @@ export const createGateway = async (config: GatewayConfig = {}) => {
       return;
     }
 
+    const selectedAgentId = header(req.headers, "x-deepseek-ui-agent");
+    const selectedAgent = selectedAgentId ? await store.getAgent(selectedAgentId, owner) : undefined;
+    if (selectedAgentId && (!selectedAgent || !selectedAgent.enabled)) {
+      json(res, 403, { error: { message: "Agent is unavailable for this workspace" } });
+      return;
+    }
+    const selectedProjectId = header(req.headers, "x-deepseek-ui-project") ?? undefined;
+    if (selectedAgent?.projectIds.length && selectedProjectId && !selectedAgent.projectIds.includes(selectedProjectId)) {
+      json(res, 403, { error: { message: "Agent is not allowed in this project" } });
+      return;
+    }
+    const effectiveProvider = selectedAgent?.provider ?? provider;
+    const effectiveModel = selectedAgent?.model ?? input.model ?? cfg.model ?? "deepseek-flash";
     const controller = new AbortController();
     req.on("aborted", () => controller.abort());
     res.on("close", () => {
       if (!res.writableEnded) controller.abort();
     });
     const agent = new Agent({
-      client: createProvider(provider, {
+      client: createProvider(effectiveProvider, {
         apiKey: apiKey ?? "",
         baseUrl: upstream,
-        model: process.env.DEEPSEEK_MODEL ?? input.model ?? cfg.model,
+        model: process.env.DEEPSEEK_MODEL ?? effectiveModel,
         reasoningEffort: input.thinking?.type === "enabled" ? "high" : "none",
         maxRetries: cfg.maxRetries,
         mockDelayMs: cfg.mockDelayMs,
@@ -464,9 +550,12 @@ export const createGateway = async (config: GatewayConfig = {}) => {
       mcp,
       skills,
       permissions,
-      systemPrompt: input.system ?? "You are a helpful assistant.",
+      systemPrompt: [input.system ?? "You are a helpful assistant.", selectedAgent?.instructions].filter(Boolean).join("\n\n"),
       maxIterations: input.max_tokens ? Math.max(1, Math.min(40, Math.ceil(input.max_tokens / 256))) : undefined,
-      enabledSkills: csvHeader(req.headers, "x-deepseek-ui-skills"),
+      enabledSkills: new Set(
+        [...(csvHeader(req.headers, "x-deepseek-ui-skills") ?? new Set<string>())]
+          .filter((skill) => !selectedAgent || selectedAgent.skillNames.includes(skill)),
+      ),
       enabledMcpServers: csvHeader(req.headers, "x-deepseek-ui-integrations"),
       maxContextChars: 120_000,
       projectInstructions: (await store.getProject(header(req.headers, "x-deepseek-ui-project") ?? "", owner))?.instructions,
@@ -478,29 +567,31 @@ export const createGateway = async (config: GatewayConfig = {}) => {
           `[Source: ${chunk.metadata.filename ?? chunk.fileId}](/files/${chunk.fileId}/content)${chunk.page ? ` (page ${chunk.page})` : ""}\n${chunk.content}`,
         ).join("\n\n");
       },
+      allowedTools: selectedAgent ? new Set(selectedAgent.allowedTools) : undefined,
     });
     const conversationId = header(req.headers, "x-deepseek-ui-conversation") ?? randomUUID();
     await store.conversation({
       id: conversationId,
       owner,
-      provider,
-      model: input.model ?? cfg.model ?? "deepseek-flash",
+      provider: effectiveProvider,
+      model: effectiveModel,
       metadata: {
         projectId: header(req.headers, "x-deepseek-ui-project") ?? undefined,
+        agentId: selectedAgent?.id,
       },
     });
     const run = await store.createRun({
       owner,
       conversationId,
-      provider,
-      model: input.model ?? cfg.model ?? "deepseek-flash",
+      provider: effectiveProvider,
+      model: effectiveModel,
     });
     activeRuns.set(run.id, controller);
     const emit = async (type: string, payload: Record<string, unknown>) => {
       await store.appendEvent(run.id, conversationId, type, payload);
     };
     await store.updateRun(run.id, { status: "running" });
-    await emit("run.started", { provider, model: run.model });
+    await emit("run.started", { provider: effectiveProvider, model: run.model });
     const history = toAgentMessages(input.messages);
     const latest = history.at(-1);
     const prompt = latest?.role === "user" ? latest.content : "";
@@ -515,7 +606,7 @@ export const createGateway = async (config: GatewayConfig = {}) => {
     const messageId = randomUUID();
     writeEvent(res, "message_start", {
       type: "message_start",
-      message: { id: messageId, type: "message", role: "assistant", model: input.model ?? cfg.model ?? "deepseek-flash", usage: { input_tokens: 0, output_tokens: 0 } },
+      message: { id: messageId, type: "message", role: "assistant",       model: effectiveModel, usage: { input_tokens: 0, output_tokens: 0 } },
     });
     let index = 0;
     let usage: { input_tokens: number; output_tokens: number } = { input_tokens: 0, output_tokens: 0 };
@@ -602,7 +693,7 @@ export const createGateway = async (config: GatewayConfig = {}) => {
         runId: run.id,
         role: "assistant",
         content: "streamed",
-        metadata: { provider, usage },
+        metadata: { provider: effectiveProvider, usage },
       });
       await store.updateRun(run.id, { status: "completed" });
       await emit("run.completed", { usage });

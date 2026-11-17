@@ -7,6 +7,7 @@ import { cancelUpload, describeUploadError, uploadAttachment, useUploads } from 
 import { useSettings } from '../settings.js'
 import { useWorkspace } from '../workspace.js'
 import { useProjects } from '../projects.js'
+import { useAgents } from '../agents.js'
 import { appendBranch, getVisibleMessages, normalizeSession, selectVersion } from './branches.js'
 import * as db from './db.js'
 import {
@@ -1117,6 +1118,7 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
               .map((item) => item.id)
               .join(','),
             'x-deepseek-ui-provider': (initial.model ?? MODEL) === 'mock' ? 'mock' : 'deepseek',
+            ...(useAgents.getState().selectedAgentId ? { 'x-deepseek-ui-agent': useAgents.getState().selectedAgentId ?? '' } : {}),
             ...(getSession(sessionId)?.projectId ? { 'x-deepseek-ui-project': getSession(sessionId)?.projectId } : {}),
           }
         )

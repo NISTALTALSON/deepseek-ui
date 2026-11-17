@@ -71,6 +71,7 @@ export interface AgentDeps {
   maxContextChars?: number;
   projectInstructions?: string;
   knowledgeSearch?: (query: string) => Promise<string>;
+  allowedTools?: ReadonlySet<string>;
 }
 
 const messageChars = (message: Message): number => JSON.stringify(message).length;
@@ -132,7 +133,9 @@ export class Agent {
         readOnly: true,
       });
     }
-    return t;
+    return this.d.allowedTools
+      ? t.filter((tool) => this.d.allowedTools!.has(tool.name))
+      : t;
   }
 
   private toolSpec(name: string): ToolSpec | undefined {

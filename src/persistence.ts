@@ -98,6 +98,29 @@ export type KnowledgeChunkRecord = {
   createdAt: string;
 };
 
+export type AgentRecord = {
+  id: string;
+  owner: string;
+  name: string;
+  description: string;
+  avatar?: string;
+  instructions: string;
+  provider: "deepseek" | "mock";
+  model: string;
+  parameters: Record<string, unknown>;
+  skillNames: string[];
+  allowedTools: string[];
+  projectIds: string[];
+  memoryEnabled: boolean;
+  welcomeMessage: string;
+  examplePrompts: string[];
+  enabled: boolean;
+  version: number;
+  versions: Array<{ version: number; savedAt: string; config: Record<string, unknown> }>;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export interface PersistenceAdapter {
   load(): Promise<void>;
   conversation(input?: Partial<ConversationRecord>): Promise<ConversationRecord>;
@@ -125,6 +148,11 @@ export interface PersistenceAdapter {
   deleteFile(id: string, owner: string): Promise<boolean>;
   replaceKnowledgeChunks(fileId: string, owner: string, chunks: Omit<KnowledgeChunkRecord, "createdAt">[]): Promise<KnowledgeChunkRecord[]>;
   searchKnowledge(owner: string, query: string, projectId?: string, limit?: number): Promise<KnowledgeChunkRecord[]>;
+  createAgent(input: Pick<AgentRecord, "owner" | "name"> & Partial<AgentRecord>): Promise<AgentRecord>;
+  listAgents(owner: string, includeDisabled?: boolean): Promise<AgentRecord[]>;
+  getAgent(id: string, owner: string): Promise<AgentRecord | undefined>;
+  updateAgent(id: string, owner: string, patch: Partial<AgentRecord>): Promise<AgentRecord | undefined>;
+  deleteAgent(id: string, owner: string): Promise<boolean>;
 }
 
 type StoreData = {
@@ -139,11 +167,12 @@ type StoreData = {
   artifacts: Array<Record<string, unknown>>;
   files: FileRecord[];
   knowledgeChunks: KnowledgeChunkRecord[];
+  agents: AgentRecord[];
 };
 
 const emptyData = (): StoreData => ({
   conversations: [], messages: [], runs: [], events: [], toolExecutions: [],
-  approvals: [], projects: [], memories: [], artifacts: [], files: [], knowledgeChunks: [],
+  approvals: [], projects: [], memories: [], artifacts: [], files: [], knowledgeChunks: [], agents: [],
 });
 
 const locks = new Map<string, Promise<void>>();
@@ -442,5 +471,71 @@ export class WorkspaceStore implements PersistenceAdapter {
       .sort((a, b) => b.score - a.score || a.chunk.chunkIndex - b.chunk.chunkIndex)
       .slice(0, limit)
       .map((item) => item.chunk);
+  }
+
+  async createAgent(input: Pick<AgentRecord, "owner" | "name"> & Partial<AgentRecord>): Promise<AgentRecord> {
+    return this.mutate(() => {
+      const now = new Date().toISOString();
+      const agent: AgentRecord = {
+        id: input.id ?? randomUUID(),
+        owner: input.owner,
+        name: input.name.trim(),
+        description: input.description ?? "",
+        avatar: input.avatar,
+        instructions: input.instructions ?? "",
+        provider: input.provider ?? "mock",
+        model: input.model ?? "mock",
+        parameters: input.parameters ?? {},
+        skillNames: [...(input.skillNames ?? [])],
+        allowedTools: [...(input.allowedTools ?? [])],
+        projectIds: [...(input.projectIds ?? [])],
+        memoryEnabled: input.memoryEnabled ?? true,
+        welcomeMessage: input.welcomeMessage ?? "",
+        examplePrompts: [...(input.examplePrompts ?? [])],
+        enabled: input.enabled ?? true,
+        version: input.version ?? 1,
+        versions: input.versions ?? [],
+        createdAt: input.createdAt ?? now,
+        updatedAt: now,
+      };
+      this.data.agents.push(agent);
+      return agent;
+    });
+  }
+
+  async listAgents(owner: string, includeDisabled = false): Promise<AgentRecord[]> {
+    await this.load();
+    return this.data.agents
+      .filter((agent) => agent.owner === owner && (includeDisabled || agent.enabled))
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  async getAgent(id: string, owner: string): Promise<AgentRecord | undefined> {
+    await this.load();
+    return this.data.agents.find((agent) => agent.id === id && agent.owner === owner);
+  }
+
+  async updateAgent(id: string, owner: string, patch: Partial<AgentRecord>): Promise<AgentRecord | undefined> {
+    return this.mutate(() => {
+      const agent = this.data.agents.find((item) => item.id === id && item.owner === owner);
+      if (!agent) return undefined;
+      const previous = { ...agent };
+      const nextVersion = agent.version + 1;
+      const snapshot = Object.fromEntries(Object.entries(previous).filter(([key]) =>
+        !["versions", "updatedAt"].includes(key),
+      ));
+      Object.assign(agent, patch, { id: agent.id, owner: agent.owner, version: nextVersion, updatedAt: new Date().toISOString() });
+      agent.versions = [...agent.versions, { version: agent.version, savedAt: previous.updatedAt, config: snapshot }];
+      return agent;
+    });
+  }
+
+  async deleteAgent(id: string, owner: string): Promise<boolean> {
+    return this.mutate(() => {
+      const index = this.data.agents.findIndex((agent) => agent.id === id && agent.owner === owner);
+      if (index < 0) return false;
+      this.data.agents.splice(index, 1);
+      return true;
+    });
   }
 }

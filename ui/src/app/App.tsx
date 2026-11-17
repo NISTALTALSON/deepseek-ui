@@ -28,6 +28,8 @@ import styles from './App.module.css'
 import { WorkspaceDialog } from '../components/workspace/WorkspaceDialog.js'
 import { ProjectWorkspace } from '../components/projects/ProjectWorkspace.js'
 import { closeProjects, useProjectDialog } from '../components/projects/projectDialogState.js'
+import { AgentBuilder } from '../components/agents/AgentBuilder.js'
+import { loadAgents } from '../services/agents.js'
 
 export const App = () => {
   const t = useTranslate()
@@ -73,6 +75,7 @@ export const App = () => {
 
   useEffect(() => {
     void initChat()
+    void loadAgents()
     // 首次打开先在设置里输入 API Key
     ensureApiKey()
   }, [])
@@ -139,6 +142,7 @@ export const App = () => {
       <SettingsDialog />
       <WorkspaceDialog />
       <ProjectWorkspace open={projectsOpen} onClose={closeProjects} />
+      <AgentBuilder />
       <Toast />
     </>
   )
