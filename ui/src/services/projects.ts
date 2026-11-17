@@ -138,3 +138,21 @@ export const deleteProjectFile = async (id: string) => {
   }
   useProjects.setState((state) => ({ files: state.files.filter((file) => file.id !== id) }))
 }
+
+export const openProjectFile = async (id: string, download = false) => {
+  const response = await fetch(`${API_ORIGIN}/files/${encodeURIComponent(id)}/content`, { headers: workspaceHeaders() })
+  if (!response.ok) {
+    throw new Error((await response.text()) || response.statusText)
+  }
+  const blob = await response.blob()
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  if (download) {
+    anchor.download = 'project-file'
+    anchor.click()
+  } else {
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+}

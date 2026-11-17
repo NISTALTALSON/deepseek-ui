@@ -7,6 +7,7 @@ import {
   deleteProject,
   deleteProjectFile,
   loadProjects,
+  openProjectFile,
   selectProject,
   updateProject,
   uploadProjectFile,
@@ -107,6 +108,8 @@ export const ProjectWorkspace = ({ open, onClose }: { open: boolean; onClose: ()
                 <div className={styles.file} key={file.id}>
                   <span>{file.originalName}</span>
                   <small>{file.extractionStatus}{file.extractionError ? ` · ${file.extractionError}` : ''}</small>
+                  <Button size="s" variant="outlined" onClick={() => void openProjectFile(file.id)}>Preview</Button>
+                  <Button size="s" variant="outlined" onClick={() => void openProjectFile(file.id, true)}>Download</Button>
                   <Button size="s" variant="outlined" onClick={() => void deleteProjectFile(file.id)}>Delete</Button>
                 </div>
               ))}
