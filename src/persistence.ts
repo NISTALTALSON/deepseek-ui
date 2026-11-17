@@ -121,6 +121,21 @@ export type AgentRecord = {
   updatedAt: string;
 };
 
+export type IntegrationRecord = {
+  id: string;
+  owner: string;
+  kind: "plugin" | "mcp" | "connector";
+  name: string;
+  description: string;
+  version: string;
+  enabled: boolean;
+  status: "available" | "connected" | "error" | "disabled";
+  config: Record<string, unknown>;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export interface PersistenceAdapter {
   load(): Promise<void>;
   conversation(input?: Partial<ConversationRecord>): Promise<ConversationRecord>;
@@ -153,6 +168,10 @@ export interface PersistenceAdapter {
   getAgent(id: string, owner: string): Promise<AgentRecord | undefined>;
   updateAgent(id: string, owner: string, patch: Partial<AgentRecord>): Promise<AgentRecord | undefined>;
   deleteAgent(id: string, owner: string): Promise<boolean>;
+  createIntegration(input: Pick<IntegrationRecord, "owner" | "kind" | "name"> & Partial<IntegrationRecord>): Promise<IntegrationRecord>;
+  listIntegrations(owner: string): Promise<IntegrationRecord[]>;
+  updateIntegration(id: string, owner: string, patch: Partial<IntegrationRecord>): Promise<IntegrationRecord | undefined>;
+  deleteIntegration(id: string, owner: string): Promise<boolean>;
 }
 
 type StoreData = {
@@ -168,11 +187,12 @@ type StoreData = {
   files: FileRecord[];
   knowledgeChunks: KnowledgeChunkRecord[];
   agents: AgentRecord[];
+  integrations: IntegrationRecord[];
 };
 
 const emptyData = (): StoreData => ({
   conversations: [], messages: [], runs: [], events: [], toolExecutions: [],
-  approvals: [], projects: [], memories: [], artifacts: [], files: [], knowledgeChunks: [], agents: [],
+  approvals: [], projects: [], memories: [], artifacts: [], files: [], knowledgeChunks: [], agents: [], integrations: [],
 });
 
 const locks = new Map<string, Promise<void>>();
@@ -535,6 +555,51 @@ export class WorkspaceStore implements PersistenceAdapter {
       const index = this.data.agents.findIndex((agent) => agent.id === id && agent.owner === owner);
       if (index < 0) return false;
       this.data.agents.splice(index, 1);
+      return true;
+    });
+  }
+
+  async createIntegration(input: Pick<IntegrationRecord, "owner" | "kind" | "name"> & Partial<IntegrationRecord>): Promise<IntegrationRecord> {
+    return this.mutate(() => {
+      const now = new Date().toISOString();
+      const integration: IntegrationRecord = {
+        id: input.id ?? randomUUID(),
+        owner: input.owner,
+        kind: input.kind,
+        name: input.name.trim(),
+        description: input.description ?? "",
+        version: input.version ?? "1.0.0",
+        enabled: input.enabled ?? false,
+        status: input.status ?? "available",
+        config: input.config ?? {},
+        error: input.error,
+        createdAt: input.createdAt ?? now,
+        updatedAt: now,
+      };
+      this.data.integrations.push(integration);
+      return integration;
+    });
+  }
+
+  async listIntegrations(owner: string): Promise<IntegrationRecord[]> {
+    await this.load();
+    return this.data.integrations.filter((item) => item.owner === owner).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  async updateIntegration(id: string, owner: string, patch: Partial<IntegrationRecord>): Promise<IntegrationRecord | undefined> {
+    return this.mutate(() => {
+      const integration = this.data.integrations.find((item) => item.id === id && item.owner === owner);
+      if (!integration) return undefined;
+      Object.assign(integration, patch, { id: integration.id, owner: integration.owner, updatedAt: new Date().toISOString() });
+      return integration;
+    });
+  }
+
+  async deleteIntegration(id: string, owner: string): Promise<boolean> {
+    return this.mutate(() => {
+      const index = this.data.integrations.findIndex((item) => item.id === id && item.owner === owner);
+      if (index < 0) return false;
+      this.data.integrations.splice(index, 1);
       return true;
     });
   }

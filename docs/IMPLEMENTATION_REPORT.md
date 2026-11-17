@@ -100,6 +100,13 @@ root suite (20 passing tests).
 `src/mcp.ts`, `src/skills.ts`, `ui/src/services/agents.ts`,
 `ui/src/components/agents/AgentBuilder.tsx`.
 
+**Managed capabilities:** `SKILL.md` upload, metadata inspection, source
+editing, removal, and version metadata are now backed by the gateway. Plugin,
+MCP, and connector records can be created, enabled/disabled, listed, and
+removed as owner-scoped metadata. They remain `available` until a real backend
+connection/authentication succeeds; no placeholder integration is reported as
+connected.
+
 ### Milestone 4 — providers
 
 **Completed:** `ModelProvider` is now the agent dependency. DeepSeek and the
@@ -122,7 +129,7 @@ scenarios, cost dashboards, OpenTelemetry export, and a production auth layer.
 
 ## Validation results
 
-- Root tests: **20 passed, 0 failed**
+- Root tests: **21 passed, 0 failed**
 - Root TypeScript type-check: **passed**
 - UI TypeScript type-check: **passed**
 - UI lint: **0 warnings, 0 errors**
@@ -137,8 +144,8 @@ scenarios, cost dashboards, OpenTelemetry export, and a production auth layer.
 - Projects/files integration: project creation, upload, extraction completion,
   keyword retrieval, source links, and unauthorized file access are covered.
 - Agent ecosystem integration: agent CRUD/versioning, owner isolation, selected
-  agent execution, real tool/skill discovery, and gateway policy boundaries are
-  covered.
+  agent execution, managed skill lifecycle, real tool/skill discovery, and
+  gateway policy boundaries are covered.
 
 ## Configuration and external dependencies
 

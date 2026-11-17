@@ -22,7 +22,10 @@ export type Integration = {
   enabled: boolean
   status: 'connected' | 'available'
   detail?: string
+  version?: string
 }
+
+export type SkillInfo = { name: string; description: string; version?: string; scope?: string }
 
 export const MODEL_OPTIONS: ModelOption[] = [
   {
@@ -79,6 +82,7 @@ type WorkspaceState = {
   tab: WorkspaceTab
   gatewayOnline: boolean
   gatewaySkills: string[]
+  gatewaySkillInfo: SkillInfo[]
   gatewayTools: Array<{ name: string; description: string; readOnly?: boolean }>
 }
 
@@ -90,6 +94,7 @@ export const useWorkspace = create<WorkspaceState>(() => ({
   tab: 'models',
   gatewayOnline: false,
   gatewaySkills: [],
+  gatewaySkillInfo: [],
   gatewayTools: [],
 }))
 
@@ -116,11 +121,18 @@ export const toggleSkill = (skill: string) => {
 }
 
 export const toggleIntegration = (id: string) => {
-  const integrations = useWorkspace
-    .getState()
-    .integrations.map((item) => (item.id === id ? { ...item, enabled: !item.enabled } : item))
+  const current = useWorkspace.getState().integrations
+  const target = current.find((item) => item.id === id)
+  const integrations = current.map((item) => (item.id === id ? { ...item, enabled: !item.enabled } : item))
   write('deepseek-ui:integrations', integrations)
   useWorkspace.setState({ integrations })
+  if (target && /^[0-9a-f-]{20,}$/i.test(id)) {
+    void fetch(`${API_ORIGIN}/integrations/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', 'x-deepseek-ui-workspace': 'local' },
+      body: JSON.stringify({ enabled: !target.enabled }),
+    }).catch(() => undefined)
+  }
 }
 
 export const addIntegration = (integration: Integration) => {
@@ -141,7 +153,7 @@ export const refreshGatewayCapabilities = async () => {
       return
     }
     const data = (await response.json()) as {
-      skills?: string[]
+      skills?: Array<SkillInfo | string>
       mcpServers?: string[]
       toolsList?: Array<{ name: string; description: string; readOnly?: boolean }>
     }
@@ -167,10 +179,18 @@ export const refreshGatewayCapabilities = async () => {
     write('deepseek-ui:integrations', integrations)
     useWorkspace.setState({
       gatewayOnline: true,
-      gatewaySkills: data.skills ?? [],
+      gatewaySkills: (data.skills ?? []).map((skill) => typeof skill === 'string' ? skill : skill.name),
+      gatewaySkillInfo: (data.skills ?? []).map((skill) => typeof skill === 'string' ? { name: skill, description: '' } : skill),
       gatewayTools: data.toolsList ?? [],
       integrations,
     })
+    const integrationsResponse = await fetch(`${API_ORIGIN}/integrations`, {
+      headers: { 'x-deepseek-ui-workspace': 'local', ...(apiKey ? { 'x-api-key': apiKey } : {}) },
+    })
+    if (integrationsResponse.ok) {
+      const body = await integrationsResponse.json() as { integrations?: Array<Integration & { id: string }> }
+      useWorkspace.setState({ integrations: [...integrations, ...(body.integrations ?? []).filter((item) => !integrations.some((current) => current.id === item.id))] })
+    }
   } catch {
     useWorkspace.setState({ gatewayOnline: false })
   }

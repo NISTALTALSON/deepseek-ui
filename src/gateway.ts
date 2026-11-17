@@ -6,7 +6,7 @@ import { createProvider } from "./provider.js";
 import { McpHub, type McpConfig } from "./mcp.js";
 import { Permissions, defaultPolicy, type PolicyConfig } from "./permissions.js";
 import { SkillRegistry } from "./skills.js";
-import { WorkspaceStore, type AgentRecord } from "./persistence.js";
+import { WorkspaceStore, type AgentRecord, type IntegrationRecord } from "./persistence.js";
 import { FileStorage, MAX_FILE_BYTES, processFile, validateUpload } from "./knowledge.js";
 import type { AssistantMessage, Message } from "./types.js";
 
@@ -171,7 +171,9 @@ export const createGateway = async (config: GatewayConfig = {}) => {
   const mcp = new McpHub();
   if (cfg.mcp) await mcp.connect(cfg.mcp);
   const skills = new SkillRegistry();
-  await skills.scan(cfg.skills ?? ["./skills"]);
+  const skillRoots = cfg.skills ?? ["./skills"];
+  await skills.scan(skillRoots);
+  const managedSkillsRoot = skillRoots[0] ?? "./skills";
   const permissions = new Permissions(
     cfg.policy ?? {
       ...defaultPolicy,
@@ -247,6 +249,43 @@ export const createGateway = async (config: GatewayConfig = {}) => {
       });
       return;
     }
+    if (requestUrl.pathname === "/skills" && req.method === "POST") {
+      try {
+        const body = JSON.parse((await readLimitedBody(req, 250_000)).toString("utf8")) as { name?: string; content?: string };
+        if (!body.name || typeof body.content !== "string") throw new Error("name and content are required");
+        const skill = await skills.install(managedSkillsRoot, body.name, body.content);
+        json(res, 201, { skill });
+      } catch (error) {
+        json(res, 400, { error: { message: error instanceof Error ? error.message : String(error) } });
+      }
+      return;
+    }
+    const skillMatch = requestUrl.pathname.match(/^\/skills\/([^/]+)$/);
+    if (skillMatch && req.method === "GET") {
+      const source = await skills.source(decodeURIComponent(skillMatch[1]));
+      json(res, source === undefined ? 404 : 200, source === undefined ? { error: { message: "Skill not found" } } : { content: source });
+      return;
+    }
+    if (skillMatch && req.method === "PATCH") {
+      try {
+        const body = JSON.parse((await readLimitedBody(req, 250_000)).toString("utf8")) as { content?: string };
+        if (typeof body.content !== "string") throw new Error("content is required");
+        const skill = await skills.update(decodeURIComponent(skillMatch[1]), body.content);
+        json(res, 200, { skill });
+      } catch (error) {
+        json(res, 400, { error: { message: error instanceof Error ? error.message : String(error) } });
+      }
+      return;
+    }
+    if (skillMatch && req.method === "DELETE") {
+      try {
+        const deleted = await skills.remove(decodeURIComponent(skillMatch[1]));
+        json(res, deleted ? 200 : 404, deleted ? { ok: true } : { error: { message: "Skill not found" } });
+      } catch (error) {
+        json(res, 400, { error: { message: error instanceof Error ? error.message : String(error) } });
+      }
+      return;
+    }
     if (requestUrl.pathname === "/tools" && req.method === "GET") {
       json(res, 200, {
         tools: mcp.tools().map((tool) => ({
@@ -259,6 +298,46 @@ export const createGateway = async (config: GatewayConfig = {}) => {
     }
     if (requestUrl.pathname === "/mcp/servers" && req.method === "GET") {
       json(res, 200, { servers: mcp.serverDetails() });
+      return;
+    }
+    if (requestUrl.pathname === "/integrations" && req.method === "GET") {
+      json(res, 200, { integrations: await store.listIntegrations(owner) });
+      return;
+    }
+    if (requestUrl.pathname === "/integrations" && req.method === "POST") {
+      try {
+        const body = JSON.parse((await readLimitedBody(req, cfg.maxRequestBytes ?? 2_000_000)).toString("utf8")) as Partial<IntegrationRecord>;
+        if (!body.name || !body.kind || !["plugin", "mcp", "connector"].includes(body.kind)) throw new Error("name and valid kind are required");
+        const integration = await store.createIntegration({
+          owner, name: body.name, kind: body.kind, description: body.description, version: body.version,
+          config: body.config && typeof body.config === "object" ? body.config : {}, enabled: false, status: "available",
+        });
+        json(res, 201, { integration });
+      } catch (error) {
+        json(res, 400, { error: { message: error instanceof Error ? error.message : String(error) } });
+      }
+      return;
+    }
+    const integrationMatch = requestUrl.pathname.match(/^\/integrations\/([^/]+)$/);
+    if (integrationMatch && req.method === "PATCH") {
+      try {
+        const body = JSON.parse((await readLimitedBody(req, cfg.maxRequestBytes ?? 2_000_000)).toString("utf8")) as Partial<IntegrationRecord>;
+        const integration = await store.updateIntegration(integrationMatch[1], owner, {
+          ...(typeof body.name === "string" ? { name: body.name.trim() } : {}),
+          ...(typeof body.description === "string" ? { description: body.description } : {}),
+          ...(typeof body.version === "string" ? { version: body.version } : {}),
+          ...(typeof body.enabled === "boolean" ? { enabled: body.enabled, status: body.enabled ? "available" : "disabled" } : {}),
+          ...(body.config && typeof body.config === "object" ? { config: body.config } : {}),
+        });
+        json(res, integration ? 200 : 404, integration ? { integration } : { error: { message: "Integration not found" } });
+      } catch (error) {
+        json(res, 400, { error: { message: error instanceof Error ? error.message : String(error) } });
+      }
+      return;
+    }
+    if (integrationMatch && req.method === "DELETE") {
+      const deleted = await store.deleteIntegration(integrationMatch[1], owner);
+      json(res, deleted ? 200 : 404, deleted ? { ok: true } : { error: { message: "Integration not found" } });
       return;
     }
 

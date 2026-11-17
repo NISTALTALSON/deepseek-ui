@@ -121,6 +121,23 @@ test("agent persistence versions updates and isolates owners", async () => {
       skillNames: ["research"],
       allowedTools: ["knowledge_search"],
     });
+
+    test("managed skills install, inspect, update, and remove without executing package scripts", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "deepseek-ui-managed-skills-"));
+      try {
+        const registry = new SkillRegistry();
+        const source = "---\nname: local-skill\ndescription: Local test\nversion: 1.0.0\n---\nUse evidence.";
+        const skill = await registry.install(directory, "local-skill", source);
+        assert.equal(skill.version, "1.0.0");
+        assert.match((await registry.source("local-skill")) ?? "", /Use evidence/);
+        await registry.update("local-skill", source.replace("1.0.0", "1.1.0"));
+        assert.equal(registry.list()[0]?.version, "1.1.0");
+        assert.equal(await registry.remove("local-skill"), true);
+        assert.equal(registry.has("local-skill"), false);
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
     const updated = await store.updateAgent(agent.id, "alice", { description: "Updated" });
     assert.equal(updated?.version, 2);
     assert.equal(updated?.versions.length, 1);

@@ -86,6 +86,12 @@ the gateway is the security and execution boundary.
   browser, applies the agent's provider/model, instructions, skill allowlist,
   project allowlist, and tool allowlist. `/agents`, `/skills`, `/tools`, and
   `/mcp/servers` expose the real configured runtime state.
+- Managed package boundary: user-uploaded `SKILL.md` packages are stored under
+  the configured skill root and can be inspected, edited, enabled, and removed
+  through the gateway. Skill content is treated as untrusted instructions;
+  package scripts are never executed. Plugin, MCP, and connector metadata is
+  owner-scoped in the persistence adapter, while actual MCP connectivity still
+  comes only from the trusted gateway configuration.
 
 ## Implementation order
 

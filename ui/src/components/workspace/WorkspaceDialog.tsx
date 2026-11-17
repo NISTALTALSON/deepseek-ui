@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Button } from '../base/Button.js'
 import { Modal } from '../base/Modal.js'
 import {
@@ -11,6 +11,8 @@ import {
   refreshGatewayCapabilities,
   type WorkspaceTab,
 } from '../../services/workspace.js'
+import { API_ORIGIN, request } from '../../services/api/client.js'
+import { useSettings } from '../../services/settings.js'
 import styles from './WorkspaceDialog.module.css'
 
 const tabs: { id: WorkspaceTab; label: string }[] = [
@@ -99,7 +101,55 @@ const ModelsPanel = () => {
 
 const SkillsPanel = () => {
   const enabled = useWorkspace((state) => state.enabledSkills)
-  const skills = useWorkspace((state) => state.gatewaySkills)
+  const skills = useWorkspace((state) => state.gatewaySkillInfo)
+  const [selected, setSelected] = useState<string>()
+  const [content, setContent] = useState('')
+  const [busy, setBusy] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const headers = () => ({
+    'content-type': 'application/json',
+    'x-deepseek-ui-workspace': 'local',
+    ...(useSettings.getState().apiKey ? { 'x-api-key': useSettings.getState().apiKey ?? '' } : {}),
+  })
+  const inspect = async (name: string) => {
+    setSelected(name)
+    const response = await request(`${API_ORIGIN}/skills/${encodeURIComponent(name)}`, { headers: headers() })
+    const body = await response.json() as { content?: string }
+    setContent(body.content ?? '')
+  }
+  const upload = async (file: File) => {
+    setBusy(true)
+    try {
+      const response = await request(`${API_ORIGIN}/skills`, {
+        method: 'POST', headers: headers(), body: JSON.stringify({ name: file.name.replace(/\.md$/i, '').replace(/[^a-z0-9._-]/gi, '-'), content: await file.text() }),
+      })
+      if (response.ok) { await refreshGatewayCapabilities() }
+    } finally {
+      setBusy(false)
+    }
+  }
+  const save = async () => {
+    if (!selected) { return }
+    setBusy(true)
+    try {
+      await request(`${API_ORIGIN}/skills/${encodeURIComponent(selected)}`, { method: 'PATCH', headers: headers(), body: JSON.stringify({ content }) })
+      await refreshGatewayCapabilities()
+    } finally {
+      setBusy(false)
+    }
+  }
+  const remove = async () => {
+    if (!selected) { return }
+    setBusy(true)
+    try {
+      await request(`${API_ORIGIN}/skills/${encodeURIComponent(selected)}`, { method: 'DELETE', headers: headers() })
+      setSelected(undefined)
+      setContent('')
+      await refreshGatewayCapabilities()
+    } finally {
+      setBusy(false)
+    }
+  }
   return (
     <>
       <h2 className={styles.heading}>Skills</h2>
@@ -107,30 +157,44 @@ const SkillsPanel = () => {
       <div className={styles.cards}>
         {skills.map((skill) => (
           <button
-            key={skill}
+            key={skill.name}
             type="button"
-            className={`${styles.card} ${enabled.includes(skill) ? styles.selected : ''}`}
-            onClick={() => toggleSkill(skill)}
+            className={`${styles.card} ${enabled.includes(skill.name) ? styles.selected : ''}`}
+            onClick={() => { toggleSkill(skill.name); void inspect(skill.name) }}
           >
             <div className={styles.cardBody}>
-              <div className={styles.cardTitle}>{skill}</div>
-              <div className={styles.cardText}>Load this skill before handling matching tasks.</div>
+              <div className={styles.cardTitle}>{skill.name}<span className={styles.badge}>{skill.version ?? 'unversioned'}</span></div>
+              <div className={styles.cardText}>{skill.description || 'Load this skill before handling matching tasks.'}</div>
             </div>
-            {enabled.includes(skill) ? <span className={styles.check}>✓</span> : null}
+            {enabled.includes(skill.name) ? <span className={styles.check}>✓</span> : null}
           </button>
         ))}
       </div>
       {skills.length === 0 ? (
         <div className={styles.empty}>
-          No skills are loaded. Add a skill folder containing SKILL.md under a configured gateway skills root.
+            No skills are loaded. Upload a SKILL.md package or add a configured gateway skills root.
         </div>
       ) : null}
+        <div className={styles.actions}>
+          <Button size="s" variant="outlined" disabled={busy} onClick={() => inputRef.current?.click()}>Upload SKILL.md</Button>
+          <input ref={inputRef} hidden type="file" accept=".md" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) { void upload(file) } }} />
+        </div>
+        {selected ? <div className={styles.card}>
+          <h3>Edit {selected}</h3>
+          <textarea rows={10} value={content} onChange={(event) => setContent(event.target.value)} />
+          <div className={styles.actions}>
+            <Button size="s" variant="primary" disabled={busy} onClick={() => void save()}>Save</Button>
+            <Button size="s" variant="danger" disabled={busy} onClick={() => void remove()}>Remove</Button>
+          </div>
+        </div> : null}
     </>
   )
 }
 
 const IntegrationPanel = ({ kind }: { kind: 'plugin' | 'mcp' | 'connector' }) => {
   const integrations = useWorkspace((state) => state.integrations.filter((item) => item.kind === kind))
+  const [name, setName] = useState('')
+  const [busy, setBusy] = useState(false)
   const title = kind === 'plugin' ? 'Plugins' : kind === 'mcp' ? 'MCP servers' : 'Connectors'
   const description =
     kind === 'mcp'
@@ -159,6 +223,22 @@ const IntegrationPanel = ({ kind }: { kind: 'plugin' | 'mcp' | 'connector' }) =>
             </Button>
           </div>
         ))}
+      </div>
+      <div className={styles.actions}>
+        <input value={name} onChange={(event) => setName(event.target.value)} placeholder={`Add ${title.slice(0, -1).toLowerCase()}`} aria-label={`Add ${title.slice(0, -1).toLowerCase()}`} />
+        <Button
+          size="s"
+          variant="primary"
+          disabled={busy || !name.trim()}
+          onClick={() => {
+            setBusy(true)
+            void request(`${API_ORIGIN}/integrations`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json', 'x-deepseek-ui-workspace': 'local' },
+              body: JSON.stringify({ name: name.trim(), kind, description: `${name.trim()} integration` }),
+            }).then(() => refreshGatewayCapabilities()).finally(() => { setBusy(false); setName('') })
+          }}
+        >Add</Button>
       </div>
     </>
   )
