@@ -9,6 +9,7 @@ import { MobileHeader } from './MobileHeader.js'
 import { ActivityPanel } from './ActivityPanel.js'
 import styles from './SessionView.module.css'
 import { openWorkspace, MODEL_OPTIONS, useWorkspace } from '../../services/workspace.js'
+import { ArtifactPanel } from '../artifacts/ArtifactPanel.js'
 
 /** 会话页：标题栏（移动端为顶栏）+ 消息列表，输入框吸底 */
 export const SessionView = ({
@@ -26,6 +27,7 @@ export const SessionView = ({
   const model = useWorkspace((state) => state.model)
   const modelName = MODEL_OPTIONS.find((item) => item.id === model)?.name ?? model
   const [activityOpen, setActivityOpen] = useState(false)
+  const [artifactsOpen, setArtifactsOpen] = useState(false)
   return (
     <div className={styles.view}>
       {isMobile ? (
@@ -42,6 +44,9 @@ export const SessionView = ({
           <button type="button" className={styles.activityButton} onClick={() => setActivityOpen((open) => !open)}>
             {activityOpen ? 'Hide activity' : 'Activity'}
           </button>
+          <button type="button" className={styles.activityButton} onClick={() => setArtifactsOpen((open) => !open)}>
+            {artifactsOpen ? 'Hide artifacts' : 'Artifacts'}
+          </button>
         </div>
       )}
       <div className={styles.content}>
@@ -56,6 +61,7 @@ export const SessionView = ({
           }
         />
         {activityOpen ? <ActivityPanel session={session} /> : null}
+        {artifactsOpen ? <ArtifactPanel conversationId={session.id} onClose={() => setArtifactsOpen(false)} /> : null}
       </div>
     </div>
   )
