@@ -6,7 +6,7 @@ import { createProvider } from "./provider.js";
 import { McpHub, type McpConfig } from "./mcp.js";
 import { Permissions, defaultPolicy, type PolicyConfig } from "./permissions.js";
 import { SkillRegistry } from "./skills.js";
-import { WorkspaceStore, type AgentRecord, type ExecutionCheckpoint, type IntegrationRecord, type RunRecord } from "./persistence.js";
+import { WorkspaceStore, type AgentRecord, type ArtifactKind, type ExecutionCheckpoint, type IntegrationRecord, type RunRecord } from "./persistence.js";
 import { FileStorage, MAX_FILE_BYTES, processFile, validateUpload } from "./knowledge.js";
 import type { AssistantMessage, Message, ToolCall } from "./types.js";
 import { connectorDefinitions, connectorToolSpecs, createOAuthTransaction, executeConnectorOperation } from "./connectors.js";
@@ -468,6 +468,99 @@ export const createGateway = async (config: GatewayConfig = {}) => {
     }
     if (requestUrl.pathname === "/integrations" && req.method === "GET") {
       json(res, 200, { integrations: await store.listIntegrations(owner) });
+      return;
+    }
+    if (requestUrl.pathname === "/artifacts" && req.method === "GET") {
+      json(res, 200, {
+        artifacts: await store.listArtifacts(owner, {
+          conversationId: requestUrl.searchParams.get("conversationId") ?? undefined,
+          projectId: requestUrl.searchParams.get("projectId") ?? undefined,
+        }),
+      });
+      return;
+    }
+    if (requestUrl.pathname === "/artifacts" && req.method === "POST") {
+      try {
+        const body = JSON.parse((await readLimitedBody(req, cfg.maxRequestBytes ?? 2_000_000)).toString("utf8")) as Record<string, unknown>;
+        const kinds: ArtifactKind[] = ["markdown", "code", "html", "mermaid", "json", "data", "text"];
+        const kind = kinds.includes(body.kind as ArtifactKind) ? body.kind as ArtifactKind : "text";
+        if (typeof body.name !== "string" || !body.name.trim()) throw new Error("Artifact name is required");
+        if (typeof body.content !== "string") throw new Error("Artifact content is required");
+        if ((kind === "json" || kind === "data") && body.content.trim()) JSON.parse(body.content);
+        const artifact = await store.createArtifact({
+          owner,
+          conversationId: typeof body.conversationId === "string" ? body.conversationId : undefined,
+          projectId: typeof body.projectId === "string" ? body.projectId : undefined,
+          name: body.name.trim(),
+          kind,
+          language: typeof body.language === "string" ? body.language : undefined,
+          mimeType: typeof body.mimeType === "string" ? body.mimeType : kind === "html" ? "text/html" : kind === "json" || kind === "data" ? "application/json" : "text/plain",
+          metadata: body.metadata && typeof body.metadata === "object" ? body.metadata as Record<string, unknown> : {},
+          content: body.content,
+          createdBy: body.createdBy === "assistant" ? "assistant" : "user",
+          changeSummary: typeof body.changeSummary === "string" ? body.changeSummary : "Created artifact",
+        });
+        json(res, 201, { artifact });
+      } catch (error) {
+        json(res, 400, { error: { message: error instanceof Error ? error.message : String(error) } });
+      }
+      return;
+    }
+    const artifactVersionMatch = requestUrl.pathname.match(/^\/artifacts\/([^/]+)\/versions\/(\d+)\/restore$/);
+    if (artifactVersionMatch && req.method === "POST") {
+      const artifact = await store.restoreArtifactVersion(artifactVersionMatch[1], owner, Number(artifactVersionMatch[2]));
+      json(res, artifact ? 200 : 404, artifact ? { artifact } : { error: { message: "Artifact or version not found" } });
+      return;
+    }
+    const artifactDownloadMatch = requestUrl.pathname.match(/^\/artifacts\/([^/]+)\/download$/);
+    if (artifactDownloadMatch && req.method === "GET") {
+      const artifact = await store.getArtifact(artifactDownloadMatch[1], owner);
+      const current = artifact?.versions.find((version) => version.version === artifact.currentVersion);
+      if (!artifact || !current) {
+        json(res, 404, { error: { message: "Artifact not found" } });
+        return;
+      }
+      res.statusCode = 200;
+      res.setHeader("content-type", current.mimeType);
+      res.setHeader("content-disposition", `attachment; filename="${artifact.name.replace(/["\r\n]/g, "_")}"`);
+      res.end(current.content);
+      return;
+    }
+    const artifactMatch = requestUrl.pathname.match(/^\/artifacts\/([^/]+)$/);
+    if (artifactMatch && req.method === "GET") {
+      const artifact = await store.getArtifact(artifactMatch[1], owner);
+      json(res, artifact ? 200 : 404, artifact ? { artifact } : { error: { message: "Artifact not found" } });
+      return;
+    }
+    if (artifactMatch && req.method === "PATCH") {
+      try {
+        const body = JSON.parse((await readLimitedBody(req, cfg.maxRequestBytes ?? 2_000_000)).toString("utf8")) as Record<string, unknown>;
+        if (typeof body.content !== "string") throw new Error("Artifact content is required");
+        const artifact = await store.getArtifact(artifactMatch[1], owner);
+        if (!artifact) {
+          json(res, 404, { error: { message: "Artifact not found" } });
+          return;
+        }
+        const kind = body.kind === undefined ? artifact.kind : body.kind as ArtifactKind;
+        if ((kind === "json" || kind === "data") && body.content.trim()) JSON.parse(body.content);
+        const updated = await store.updateArtifact(artifact.id, owner, {
+          content: body.content,
+          name: typeof body.name === "string" ? body.name.trim() : undefined,
+          kind,
+          language: typeof body.language === "string" ? body.language : undefined,
+          mimeType: typeof body.mimeType === "string" ? body.mimeType : undefined,
+          createdBy: body.createdBy === "assistant" ? "assistant" : "user",
+          changeSummary: typeof body.changeSummary === "string" ? body.changeSummary : "Updated artifact",
+        });
+        json(res, updated ? 200 : 404, updated ? { artifact: updated } : { error: { message: "Artifact not found" } });
+      } catch (error) {
+        json(res, 400, { error: { message: error instanceof Error ? error.message : String(error) } });
+      }
+      return;
+    }
+    if (artifactMatch && req.method === "DELETE") {
+      const deleted = await store.deleteArtifact(artifactMatch[1], owner);
+      json(res, deleted ? 200 : 404, deleted ? { ok: true } : { error: { message: "Artifact not found" } });
       return;
     }
     if (requestUrl.pathname === "/connectors" && req.method === "GET") {

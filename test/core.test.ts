@@ -518,6 +518,30 @@ test("agent reconstructs from checkpoint messages and continues after a committe
     assert.ok(specs.some((spec) => spec.name === "connector__github__github__list_repositories" && spec.readOnly));
     assert.ok(specs.some((spec) => spec.name === "connector__github__github__create_issue" && !spec.readOnly && spec.permissionClass === "external-side-effect"));
   });
+
+  test("artifacts persist immutable versions, restore safely, and isolate owners", async () => {
+    const file = join(await mkdtemp(join(tmpdir(), "deepseek-ui-artifacts-")), "workspace.json");
+    const store = new WorkspaceStore(file);
+    const artifact = await store.createArtifact({
+      owner: "alice",
+      name: "notes.md",
+      kind: "markdown",
+      mimeType: "text/markdown",
+      content: "# One",
+      metadata: {},
+    });
+    const updated = await store.updateArtifact(artifact.id, "alice", { content: "# Two", changeSummary: "Edit" });
+    assert.equal(updated?.currentVersion, 2);
+    assert.equal(updated?.versions.length, 2);
+    assert.equal((await store.getArtifact(artifact.id, "bob")), undefined);
+    const restored = await store.restoreArtifactVersion(artifact.id, "alice", 1);
+    assert.equal(restored?.currentVersion, 3);
+    assert.equal(restored?.versions.at(-1)?.content, "# One");
+    const reloaded = new WorkspaceStore(file);
+    assert.equal((await reloaded.getArtifact(artifact.id, "alice"))?.versions.length, 3);
+    assert.equal(await reloaded.deleteArtifact(artifact.id, "bob"), false);
+    assert.equal(await reloaded.deleteArtifact(artifact.id, "alice"), true);
+  });
   const events = [];
   for await (const event of agent.resumeAfterTool(toolCall, "committed result")) events.push(event);
   assert.equal(events.at(-1)?.type, "done");

@@ -138,6 +138,32 @@ export type KnowledgeChunkRecord = {
   createdAt: string;
 };
 
+export type ArtifactKind = "markdown" | "code" | "html" | "mermaid" | "json" | "data" | "text";
+export type ArtifactVersionRecord = {
+  id: string;
+  version: number;
+  content: string;
+  mimeType: string;
+  createdAt: string;
+  createdBy: "user" | "assistant" | "system";
+  changeSummary?: string;
+};
+export type ArtifactRecord = {
+  id: string;
+  owner: string;
+  conversationId?: string;
+  projectId?: string;
+  name: string;
+  kind: ArtifactKind;
+  language?: string;
+  mimeType: string;
+  currentVersion: number;
+  versions: ArtifactVersionRecord[];
+  createdAt: string;
+  updatedAt: string;
+  metadata: Record<string, unknown>;
+};
+
 export type AgentRecord = {
   id: string;
   owner: string;
@@ -256,6 +282,12 @@ export interface PersistenceAdapter {
   deleteFile(id: string, owner: string): Promise<boolean>;
   replaceKnowledgeChunks(fileId: string, owner: string, chunks: Omit<KnowledgeChunkRecord, "createdAt">[]): Promise<KnowledgeChunkRecord[]>;
   searchKnowledge(owner: string, query: string, projectId?: string, limit?: number): Promise<KnowledgeChunkRecord[]>;
+  createArtifact(input: Omit<ArtifactRecord, "id" | "createdAt" | "updatedAt" | "currentVersion" | "versions"> & { content: string; createdBy?: ArtifactVersionRecord["createdBy"]; changeSummary?: string }): Promise<ArtifactRecord>;
+  listArtifacts(owner: string, options?: { conversationId?: string; projectId?: string }): Promise<ArtifactRecord[]>;
+  getArtifact(id: string, owner: string): Promise<ArtifactRecord | undefined>;
+  updateArtifact(id: string, owner: string, input: { content: string; name?: string; kind?: ArtifactKind; language?: string; mimeType?: string; createdBy?: ArtifactVersionRecord["createdBy"]; changeSummary?: string }): Promise<ArtifactRecord | undefined>;
+  restoreArtifactVersion(id: string, owner: string, version: number, createdBy?: ArtifactVersionRecord["createdBy"]): Promise<ArtifactRecord | undefined>;
+  deleteArtifact(id: string, owner: string): Promise<boolean>;
   createAgent(input: Pick<AgentRecord, "owner" | "name"> & Partial<AgentRecord>): Promise<AgentRecord>;
   listAgents(owner: string, includeDisabled?: boolean): Promise<AgentRecord[]>;
   getAgent(id: string, owner: string): Promise<AgentRecord | undefined>;
@@ -289,7 +321,7 @@ type StoreData = {
   toolExecutions: ToolExecutionRecord[];
   projects: ProjectRecord[];
   memories: Array<Record<string, unknown>>;
-  artifacts: Array<Record<string, unknown>>;
+  artifacts: ArtifactRecord[];
   files: FileRecord[];
   knowledgeChunks: KnowledgeChunkRecord[];
   agents: AgentRecord[];
@@ -653,6 +685,107 @@ export class WorkspaceStore implements PersistenceAdapter {
       .sort((a, b) => b.score - a.score || a.chunk.chunkIndex - b.chunk.chunkIndex)
       .slice(0, limit)
       .map((item) => item.chunk);
+  }
+
+  async createArtifact(input: Omit<ArtifactRecord, "id" | "createdAt" | "updatedAt" | "currentVersion" | "versions"> & { content: string; createdBy?: ArtifactVersionRecord["createdBy"]; changeSummary?: string }): Promise<ArtifactRecord> {
+    return this.mutate(() => {
+      const now = new Date().toISOString();
+      const version: ArtifactVersionRecord = {
+        id: randomUUID(),
+        version: 1,
+        content: input.content,
+        mimeType: input.mimeType,
+        createdAt: now,
+        createdBy: input.createdBy ?? "user",
+        changeSummary: input.changeSummary,
+      };
+      const artifact: ArtifactRecord = {
+        id: randomUUID(),
+        owner: input.owner,
+        conversationId: input.conversationId,
+        projectId: input.projectId,
+        name: input.name,
+        kind: input.kind,
+        language: input.language,
+        mimeType: input.mimeType,
+        currentVersion: 1,
+        versions: [version],
+        createdAt: now,
+        updatedAt: now,
+        metadata: input.metadata,
+      };
+      this.data.artifacts.push(artifact);
+      return artifact;
+    });
+  }
+
+  async listArtifacts(owner: string, options: { conversationId?: string; projectId?: string } = {}): Promise<ArtifactRecord[]> {
+    await this.load();
+    return this.data.artifacts
+      .filter((artifact) => artifact.owner === owner)
+      .filter((artifact) => options.conversationId === undefined || artifact.conversationId === options.conversationId)
+      .filter((artifact) => options.projectId === undefined || artifact.projectId === options.projectId)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  async getArtifact(id: string, owner: string): Promise<ArtifactRecord | undefined> {
+    await this.load();
+    return this.data.artifacts.find((artifact) => artifact.id === id && artifact.owner === owner);
+  }
+
+  async updateArtifact(id: string, owner: string, input: { content: string; name?: string; kind?: ArtifactKind; language?: string; mimeType?: string; createdBy?: ArtifactVersionRecord["createdBy"]; changeSummary?: string }): Promise<ArtifactRecord | undefined> {
+    return this.mutate(() => {
+      const artifact = this.data.artifacts.find((item) => item.id === id && item.owner === owner);
+      if (!artifact) return undefined;
+      const now = new Date().toISOString();
+      const version: ArtifactVersionRecord = {
+        id: randomUUID(),
+        version: artifact.currentVersion + 1,
+        content: input.content,
+        mimeType: input.mimeType ?? artifact.mimeType,
+        createdAt: now,
+        createdBy: input.createdBy ?? "user",
+        changeSummary: input.changeSummary,
+      };
+      artifact.versions.push(version);
+      artifact.currentVersion = version.version;
+      artifact.updatedAt = now;
+      if (input.name !== undefined) artifact.name = input.name;
+      if (input.kind !== undefined) artifact.kind = input.kind;
+      if (input.language !== undefined) artifact.language = input.language;
+      if (input.mimeType !== undefined) artifact.mimeType = input.mimeType;
+      return artifact;
+    });
+  }
+
+  async restoreArtifactVersion(id: string, owner: string, version: number, createdBy: ArtifactVersionRecord["createdBy"] = "user"): Promise<ArtifactRecord | undefined> {
+    return this.mutate(() => {
+      const artifact = this.data.artifacts.find((item) => item.id === id && item.owner === owner);
+      const source = artifact?.versions.find((item) => item.version === version);
+      if (!artifact || !source) return undefined;
+      const now = new Date().toISOString();
+      const restored: ArtifactVersionRecord = {
+        id: randomUUID(),
+        version: artifact.currentVersion + 1,
+        content: source.content,
+        mimeType: source.mimeType,
+        createdAt: now,
+        createdBy,
+        changeSummary: `Restored version ${version}`,
+      };
+      artifact.versions.push(restored);
+      artifact.currentVersion = restored.version;
+      artifact.updatedAt = now;
+      return artifact;
+    });
+  }
+
+  async deleteArtifact(id: string, owner: string): Promise<boolean> {
+    return this.mutate(() => {
+      const before = this.data.artifacts.length;
+      this.data.artifacts = this.data.artifacts.filter((artifact) => !(artifact.id === id && artifact.owner === owner));
+      return this.data.artifacts.length !== before;
+    });
   }
 
   async createAgent(input: Pick<AgentRecord, "owner" | "name"> & Partial<AgentRecord>): Promise<AgentRecord> {
