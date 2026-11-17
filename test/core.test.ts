@@ -43,7 +43,7 @@ test("workspace store persists runs and replayable events", async () => {
     assert.equal((await second.getRun(run.id))?.status, "running");
     assert.equal((await second.events(run.id, -1))[0]?.sequence, 0);
   } finally {
-    await rm(directory, { recursive: true, force: true });
+    await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 
@@ -120,12 +120,52 @@ test("projects, files, extraction, and keyword knowledge stay owner and project 
     id: fileId, owner: "alice", projectId: project.id, originalName: "policy.md", mimeType: info.mimeType,
     size: 42, storageKey, extractionStatus: "queued", metadata: {},
   });
+
   const extracted = await extractDocument(await storage.read(storageKey), file.originalName);
   await store.updateFile(file.id, "alice", { extractionStatus: "completed", extractedText: extracted.text });
   await store.replaceKnowledgeChunks(file.id, "alice", chunkDocument(file, extracted, 200, 20));
   assert.equal((await store.searchKnowledge("alice", "seven years", project.id)).length, 1);
   assert.equal((await store.searchKnowledge("bob", "seven years", project.id)).length, 0);
   assert.throws(() => validateUpload("../secret.txt", 5));
+});
+
+test("gateway project and file APIs enforce ownership and expose searchable sources", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "deepseek-ui-gateway-projects-"));
+  const gateway = await createGateway({ provider: "mock", dataFile: join(directory, "workspace.json"), filesRoot: join(directory, "files") });
+  await new Promise<void>((resolve) => gateway.server.listen(0, "127.0.0.1", resolve));
+  const address = gateway.server.address();
+  const base = `http://127.0.0.1:${typeof address === "object" && address ? address.port : 0}`;
+  try {
+    const projectResponse = await fetch(`${base}/projects`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-deepseek-ui-workspace": "alice" },
+      body: JSON.stringify({ name: "Research", instructions: "Use uploaded evidence." }),
+    });
+    assert.equal(projectResponse.status, 201);
+    const project = (await projectResponse.json() as { project: { id: string } }).project;
+    const upload = await fetch(`${base}/files`, {
+      method: "POST",
+      headers: { "x-deepseek-ui-workspace": "alice", "x-project-id": project.id, "x-file-name": "notes.md", "content-type": "text/markdown" },
+      body: "# Facts\nThe retention period is seven years.",
+    });
+    assert.equal(upload.status, 201);
+    const file = (await upload.json() as { file: { id: string } }).file;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const current = await (await fetch(`${base}/files/${file.id}`, { headers: { "x-deepseek-ui-workspace": "alice" } })).json() as { file: { extractionStatus: string } };
+      if (current.file.extractionStatus === "completed") break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    const search = await fetch(`${base}/knowledge/search`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-deepseek-ui-workspace": "alice" },
+      body: JSON.stringify({ projectId: project.id, query: "seven years" }),
+    });
+    assert.equal((await search.json() as { results: Array<{ fileId: string }> }).results[0]?.fileId, file.id);
+    assert.equal((await fetch(`${base}/files/${file.id}`, { headers: { "x-deepseek-ui-workspace": "bob" } })).status, 404);
+  } finally {
+    await gateway.close();
+    await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  }
 });
 
 test("gateway cancellation aborts active mock generation and is idempotent", async () => {

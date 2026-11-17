@@ -356,7 +356,7 @@ export const createGateway = async (config: GatewayConfig = {}) => {
         const chunks = await store.searchKnowledge(owner, body.query, body.projectId, Math.min(20, Math.max(1, body.limit ?? 8)));
         json(res, 200, { results: chunks.map((chunk) => ({
           id: chunk.id, content: chunk.content, page: chunk.page, section: chunk.section, fileId: chunk.fileId,
-          source: `Source: ${chunk.metadata.filename ?? chunk.fileId}${chunk.page ? ` (page ${chunk.page})` : ""}`,
+          source: `Source: [${chunk.metadata.filename ?? chunk.fileId}](/files/${chunk.fileId}/content)${chunk.page ? ` (page ${chunk.page})` : ""}`,
         })) });
       } catch (error) {
         json(res, 400, { error: { message: error instanceof Error ? error.message : String(error) } });
@@ -471,7 +471,7 @@ export const createGateway = async (config: GatewayConfig = {}) => {
         const chunks = await store.searchKnowledge(owner, query, projectId, 8);
         if (!chunks.length) return "No relevant project knowledge was found.";
         return chunks.map((chunk) =>
-          `[${chunk.metadata.filename ?? chunk.fileId}${chunk.page ? `, page ${chunk.page}` : ""}]\n${chunk.content}`,
+          `[Source: ${chunk.metadata.filename ?? chunk.fileId}](/files/${chunk.fileId}/content)${chunk.page ? ` (page ${chunk.page})` : ""}\n${chunk.content}`,
         ).join("\n\n");
       },
     });
