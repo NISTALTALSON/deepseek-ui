@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createServer, type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
 import { Agent } from "./agent.js";
@@ -9,6 +9,8 @@ import { SkillRegistry } from "./skills.js";
 import { WorkspaceStore, type AgentRecord, type ExecutionCheckpoint, type IntegrationRecord, type RunRecord } from "./persistence.js";
 import { FileStorage, MAX_FILE_BYTES, processFile, validateUpload } from "./knowledge.js";
 import type { AssistantMessage, Message, ToolCall } from "./types.js";
+import { connectorDefinitions, connectorToolSpecs, createOAuthTransaction, executeConnectorOperation } from "./connectors.js";
+import { decryptCredential, encryptCredential } from "./credentials.js";
 
 export type GatewayConfig = {
   host?: string;
@@ -230,6 +232,7 @@ export const createGateway = async (config: GatewayConfig = {}) => {
         const controller = new AbortController();
         activeRuns.set(runId, controller);
         const projectId = typeof config.projectId === "string" ? config.projectId : undefined;
+        const enabledConnectorIds = new Set(Array.isArray(config.enabledConnectors) ? config.enabledConnectors.filter((value): value is string => typeof value === "string") : []);
         const agent = new Agent({
           client: createProvider(checkpoint.providerId, {
             apiKey: upstreamKey ?? "",
@@ -245,6 +248,15 @@ export const createGateway = async (config: GatewayConfig = {}) => {
           initialMessages: checkpoint.messages,
           enabledSkills: new Set(Array.isArray(config.skillNames) ? config.skillNames.filter((value): value is string => typeof value === "string") : []),
           enabledMcpServers: new Set(Array.isArray(config.enabledMcpServers) ? config.enabledMcpServers.filter((value): value is string => typeof value === "string") : []),
+          enabledConnectors: enabledConnectorIds,
+          connectorExecute: async (name, args, signal) => {
+            const connectorId = name.split("__", 3)[1];
+            const integration = (await store.listIntegrations(owner)).find((item) => item.kind === "connector" && item.config.connectorId === connectorId && item.enabled && item.status === "connected");
+            if (!integration) throw new Error("Connector is not enabled or connected");
+            const credential = await store.getCredential(integration.id, owner);
+            if (!credential) throw new Error("Connector credential is unavailable");
+            return executeConnectorOperation(name, args, { connectorId, owner, config: integration.config, credential: decryptCredential(credential.encrypted, process.env.CREDENTIAL_ENCRYPTION_KEY ?? "") });
+          },
           allowedTools: new Set(Array.isArray(config.allowedTools) ? config.allowedTools.filter((value): value is string => typeof value === "string") : []),
           projectInstructions: projectId ? (await store.getProject(projectId, owner))?.instructions : undefined,
           knowledgeSearch: async (query) => {
@@ -378,13 +390,17 @@ export const createGateway = async (config: GatewayConfig = {}) => {
 
     const requestedProvider = header(req.headers, "x-deepseek-ui-provider");
     const provider = requestedProvider === "mock" || cfg.provider === "mock" ? "mock" : "deepseek";
-    const owner = header(req.headers, "x-deepseek-ui-workspace") ?? "local";
     const apiKey = getRequestApiKey(req.headers, upstreamKey);
     const gatewayKey = process.env.GATEWAY_API_KEY;
     if (gatewayKey && apiKey !== gatewayKey) {
       json(res, 401, { error: { message: "Invalid gateway API key", type: "authentication_error" } });
       return;
     }
+    const owner = gatewayKey ? (process.env.GATEWAY_OWNER ?? "authenticated-user") : (header(req.headers, "x-deepseek-ui-workspace") ?? "local");
+    const trustedConnectorIdentity = Boolean(gatewayKey && process.env.GATEWAY_OWNER);
+    const requireTrustedConnectorIdentity = () => {
+      if (!trustedConnectorIdentity) throw new Error("Real connectors require trusted server-side identity configuration (GATEWAY_API_KEY and GATEWAY_OWNER)");
+    };
     if (!apiKey && provider !== "mock") {
       json(res, 401, { error: { message: "Missing API key", type: "authentication_error" } });
       return;
@@ -452,6 +468,97 @@ export const createGateway = async (config: GatewayConfig = {}) => {
     }
     if (requestUrl.pathname === "/integrations" && req.method === "GET") {
       json(res, 200, { integrations: await store.listIntegrations(owner) });
+      return;
+    }
+    if (requestUrl.pathname === "/connectors" && req.method === "GET") {
+      const integrations = await store.listIntegrations(owner);
+      json(res, 200, {
+        connectors: connectorDefinitions.map((definition) => {
+          const integration = integrations.find((item) => item.kind === "connector" && item.config.connectorId === definition.id);
+          return {
+            ...definition,
+            status: integration?.status ?? "not_connected",
+            integrationId: integration?.id,
+            enabled: integration?.enabled ?? false,
+          };
+        }),
+      });
+      return;
+    }
+    const connectorAuthMatch = requestUrl.pathname.match(/^\/connectors\/([^/]+)\/authorize$/);
+    if (connectorAuthMatch && req.method === "POST") {
+      try {
+        requireTrustedConnectorIdentity();
+        const definition = connectorDefinitions.find((item) => item.id === connectorAuthMatch[1]);
+        if (!definition || definition.auth !== "oauth2") throw new Error("Unsupported connector");
+        const body = JSON.parse((await readLimitedBody(req, 50_000)).toString("utf8")) as { redirectUri?: string; scopes?: string[] };
+        const redirectUri = body.redirectUri ?? process.env[`${definition.id.toUpperCase().replace(/-/g, "_")}_OAUTH_REDIRECT_URI`];
+        if (!redirectUri || !new URL(redirectUri).protocol.startsWith("https")) throw new Error("An HTTPS redirect URI is required");
+        const codeVerifier = randomBytes(32).toString("base64url");
+        const challenge = createHash("sha256").update(codeVerifier).digest("base64url");
+        const transaction = createOAuthTransaction(definition.id, owner, redirectUri, codeVerifier, body.scopes ?? definition.scopes);
+        await store.createOAuthTransaction(transaction);
+        const clientId = process.env[`${definition.id.toUpperCase().replace(/-/g, "_")}_OAUTH_CLIENT_ID`];
+        if (!clientId) throw new Error("Connector OAuth client is not configured");
+        const authorization = definition.id === "github"
+          ? `https://github.com/login/oauth/authorize?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(transaction.state)}&scope=${encodeURIComponent(transaction.scopes.join(" "))}&code_challenge=${encodeURIComponent(challenge)}&code_challenge_method=S256`
+          : (() => { throw new Error("OAuth authorization endpoint is not configured for this connector"); })();
+        json(res, 200, { authorizationUrl: authorization, state: transaction.state, scopes: transaction.scopes });
+      } catch (error) {
+        json(res, 400, { error: { message: error instanceof Error ? error.message : String(error) } });
+      }
+      return;
+    }
+    const oauthCallbackMatch = requestUrl.pathname.match(/^\/oauth\/([^/]+)\/callback$/);
+    if (oauthCallbackMatch && req.method === "GET") {
+      try {
+        requireTrustedConnectorIdentity();
+        const state = requestUrl.searchParams.get("state") ?? "";
+        const code = requestUrl.searchParams.get("code") ?? "";
+        if (!state || !code || requestUrl.searchParams.get("error")) throw new Error("OAuth authorization was not completed");
+        const transaction = await store.consumeOAuthTransaction(state, owner);
+        if (!transaction || transaction.connectorId !== oauthCallbackMatch[1]) throw new Error("Invalid or expired OAuth state");
+        const clientId = process.env[`${transaction.connectorId.toUpperCase().replace(/-/g, "_")}_OAUTH_CLIENT_ID`];
+        const clientSecret = process.env[`${transaction.connectorId.toUpperCase().replace(/-/g, "_")}_OAUTH_CLIENT_SECRET`];
+        if (!clientId || !clientSecret) throw new Error("Connector OAuth client is not configured");
+        const tokenResponse = await fetch("https://github.com/login/oauth/access_token", {
+          method: "POST",
+          headers: { accept: "application/json", "content-type": "application/json" },
+          body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, code, redirect_uri: transaction.redirectUri, state, code_verifier: transaction.codeVerifier }),
+        });
+        const token = await tokenResponse.json() as { access_token?: string; error?: string };
+        if (!tokenResponse.ok || !token.access_token) throw new Error(token.error ?? "OAuth token exchange failed");
+        let integration = (await store.listIntegrations(owner)).find((item) => item.kind === "connector" && item.config.connectorId === transaction.connectorId);
+        if (!integration) {
+          integration = await store.createIntegration({ owner, kind: "connector", name: transaction.connectorId, description: `${transaction.connectorId} connector`, version: "1", config: { connectorId: transaction.connectorId }, enabled: false, status: "connected" });
+        } else {
+          integration = await store.updateIntegration(integration.id, owner, { status: "connected", error: undefined }) ?? integration;
+        }
+        await store.createCredential({
+          id: randomUUID(),
+          owner,
+          integrationId: integration.id,
+          connectorId: transaction.connectorId,
+          encrypted: encryptCredential({ accessToken: token.access_token, scopes: transaction.scopes }, process.env.CREDENTIAL_ENCRYPTION_KEY ?? ""),
+        });
+        json(res, 200, { connected: true, integrationId: integration.id });
+      } catch (error) {
+        json(res, 400, { error: { message: error instanceof Error ? error.message : String(error) } });
+      }
+      return;
+    }
+    const connectorDisconnectMatch = requestUrl.pathname.match(/^\/connectors\/([^/]+)\/disconnect$/);
+    if (connectorDisconnectMatch && req.method === "POST") {
+      try {
+        requireTrustedConnectorIdentity();
+        const integration = (await store.listIntegrations(owner)).find((item) => item.kind === "connector" && item.config.connectorId === connectorDisconnectMatch[1]);
+        if (!integration) throw new Error("Connector is not connected");
+        await store.revokeCredential(integration.id, owner);
+        await store.updateIntegration(integration.id, owner, { enabled: false, status: "disconnected" });
+        json(res, 200, { disconnected: true });
+      } catch (error) {
+        json(res, 400, { error: { message: error instanceof Error ? error.message : String(error) } });
+      }
       return;
     }
     if (requestUrl.pathname === "/integrations" && req.method === "POST") {
@@ -878,6 +985,10 @@ export const createGateway = async (config: GatewayConfig = {}) => {
       if (!res.writableEnded) controller.abort();
     });
     const conversationId = header(req.headers, "x-deepseek-ui-conversation") ?? randomUUID();
+    const requestedIntegrations = csvHeader(req.headers, "x-deepseek-ui-integrations") ?? new Set<string>();
+    const enabledConnectorIds = new Set(
+      [...requestedIntegrations].filter((id) => connectorDefinitions.some((definition) => definition.id === id)),
+    );
     await store.conversation({
       id: conversationId,
       owner,
@@ -914,6 +1025,15 @@ export const createGateway = async (config: GatewayConfig = {}) => {
           .filter((skill) => !selectedAgent || selectedAgent.skillNames.includes(skill)),
       ),
       enabledMcpServers: csvHeader(req.headers, "x-deepseek-ui-integrations"),
+      enabledConnectors: enabledConnectorIds,
+      connectorExecute: async (name, args, signal) => {
+        const connectorId = name.split("__", 3)[1];
+        const integration = (await store.listIntegrations(owner)).find((item) => item.kind === "connector" && item.config.connectorId === connectorId && item.enabled && item.status === "connected");
+        if (!integration) throw new Error("Connector is not enabled or connected");
+        const credential = await store.getCredential(integration.id, owner);
+        if (!credential) throw new Error("Connector credential is unavailable");
+        return executeConnectorOperation(name, args, { connectorId, owner, config: integration.config, credential: decryptCredential(credential.encrypted, process.env.CREDENTIAL_ENCRYPTION_KEY ?? "") });
+      },
       maxContextChars: 120_000,
       projectInstructions: (await store.getProject(header(req.headers, "x-deepseek-ui-project") ?? "", owner))?.instructions,
       knowledgeSearch: async (query) => {
@@ -977,7 +1097,8 @@ export const createGateway = async (config: GatewayConfig = {}) => {
       systemPrompt: input.system ?? "You are a helpful assistant.",
       projectId: selectedProjectId,
       skillNames: [...(csvHeader(req.headers, "x-deepseek-ui-skills") ?? new Set<string>())],
-      enabledMcpServers: [...(csvHeader(req.headers, "x-deepseek-ui-integrations") ?? new Set<string>())],
+      enabledMcpServers: [...requestedIntegrations],
+      enabledConnectors: [...enabledConnectorIds],
       allowedTools: selectedAgent?.allowedTools ?? [],
     };
     const persistCheckpoint = async (

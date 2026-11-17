@@ -13,6 +13,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Message } from "../src/types.js";
+import { encryptCredential, decryptCredential } from "../src/credentials.js";
+import { connectorToolSpecs, createOAuthTransaction } from "../src/connectors.js";
 
 const history: Message[] = [
   { role: "user", content: "hi" },
@@ -495,6 +497,26 @@ test("agent reconstructs from checkpoint messages and continues after a committe
       { role: "user", content: "do the work" },
       { role: "assistant", content: null, tool_calls: [toolCall] },
     ],
+  });
+
+  test("connector credentials are encrypted and OAuth state is one-time and owner-scoped", async () => {
+    const encrypted = encryptCredential({ accessToken: "secret-token", refreshToken: "refresh-token" }, "test-master-key");
+    assert.notEqual(encrypted.ciphertext, JSON.stringify({ accessToken: "secret-token", refreshToken: "refresh-token" }));
+    assert.deepEqual(decryptCredential(encrypted, "test-master-key"), { accessToken: "secret-token", refreshToken: "refresh-token" });
+    assert.throws(() => decryptCredential(encrypted, "wrong-key"));
+
+    const store = new WorkspaceStore(join(await mkdtemp(join(tmpdir(), "deepseek-ui-")), "workspace.json"));
+    const transaction = createOAuthTransaction("github", "alice", "https://example.test/oauth/callback", "verifier", ["read:user"]);
+    await store.createOAuthTransaction(transaction);
+    assert.equal(await store.consumeOAuthTransaction(transaction.state, "bob"), undefined);
+    assert.ok(await store.consumeOAuthTransaction(transaction.state, "alice"));
+    assert.equal(await store.consumeOAuthTransaction(transaction.state, "alice"), undefined);
+  });
+
+  test("connector tool metadata is explicit and read-only by default", () => {
+    const specs = connectorToolSpecs(new Set(["github"]));
+    assert.ok(specs.some((spec) => spec.name === "connector__github__github__list_repositories" && spec.readOnly));
+    assert.ok(specs.some((spec) => spec.name === "connector__github__github__create_issue" && !spec.readOnly && spec.permissionClass === "external-side-effect"));
   });
   const events = [];
   for await (const event of agent.resumeAfterTool(toolCall, "committed result")) events.push(event);

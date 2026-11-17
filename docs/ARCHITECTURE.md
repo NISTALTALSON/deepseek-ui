@@ -64,8 +64,9 @@ the gateway is the security and execution boundary.
   immutable arguments, schema fingerprints, operation hashes, expiry, and
   compare-and-set decisions. The active run pauses at `awaiting_approval` and
   resumes the original call after approval through `/approvals/:id`. A gateway
-  restart preserves the approval record but intentionally leaves the run paused;
-  it does not claim checkpoint-level continuation yet.
+  restart preserves the approval record and checkpoint; approved tool
+  continuation is reconstructed only when the persisted operation is safe to
+  resume.
 - Execution checkpoints now persist normalized agent messages, pending tool
   calls, operation references, provider/model configuration, phase, sequence,
   and an integrity hash. A run lease prevents two gateway workers from
@@ -98,6 +99,19 @@ the gateway is the security and execution boundary.
   browser, applies the agent's provider/model, instructions, skill allowlist,
   project allowlist, and tool allowlist. `/agents`, `/skills`, `/tools`, and
   `/mcp/servers` expose the real configured runtime state.
+- Connector boundary: `src/connectors.ts` defines connector capabilities and
+  registers connector tools through the same `Agent` tool path as MCP and
+  skills. Connector access tokens are encrypted with AES-256-GCM in
+  `src/credentials.ts`; plaintext credentials never enter checkpoints, API
+  responses, or tool metadata. OAuth transactions are owner-bound, expiring,
+  one-time records with PKCE verifier state. Real connector routes require
+  `GATEWAY_API_KEY`, `GATEWAY_OWNER`, and `CREDENTIAL_ENCRYPTION_KEY`; local
+  workspace-header mode cannot create or use external credentials.
+- GitHub currently provides executable repository listing, file reads, and
+  approval-classified issue creation. Google Drive and Notion are registered
+  as capability placeholders until provider OAuth endpoints and resource
+  boundaries are configured; they are not reported as connected by metadata
+  alone.
 - Managed package boundary: user-uploaded `SKILL.md` packages are stored under
   the configured skill root and can be inspected, edited, enabled, and removed
   through the gateway. Skill content is treated as untrusted instructions;

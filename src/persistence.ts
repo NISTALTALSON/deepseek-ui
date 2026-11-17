@@ -169,11 +169,36 @@ export type IntegrationRecord = {
   description: string;
   version: string;
   enabled: boolean;
-  status: "available" | "connected" | "error" | "disabled";
+  status: "available" | "connected" | "error" | "disabled" | "not_configured" | "not_connected" | "awaiting_authorization" | "token_expired" | "reauthorization_required" | "disconnected";
   config: Record<string, unknown>;
   error?: string;
   createdAt: string;
   updatedAt: string;
+};
+
+export type CredentialRecord = {
+  id: string;
+  owner: string;
+  integrationId: string;
+  connectorId: string;
+  encrypted: { ciphertext: string; iv: string; tag: string; keyVersion: number };
+  expiresAt?: string;
+  revokedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type OAuthTransactionRecord = {
+  id: string;
+  owner: string;
+  connectorId: string;
+  redirectUri: string;
+  codeVerifier: string;
+  state: string;
+  scopes: string[];
+  createdAt: string;
+  expiresAt: string;
+  consumedAt?: string;
 };
 
 export type ApprovalStatus = "pending" | "approved" | "denied" | "expired" | "cancelled" | "executing" | "completed" | "failed" | "requires_reapproval";
@@ -240,6 +265,11 @@ export interface PersistenceAdapter {
   listIntegrations(owner: string): Promise<IntegrationRecord[]>;
   updateIntegration(id: string, owner: string, patch: Partial<IntegrationRecord>): Promise<IntegrationRecord | undefined>;
   deleteIntegration(id: string, owner: string): Promise<boolean>;
+  createCredential(input: Omit<CredentialRecord, "createdAt" | "updatedAt">): Promise<CredentialRecord>;
+  getCredential(integrationId: string, owner: string): Promise<CredentialRecord | undefined>;
+  revokeCredential(integrationId: string, owner: string): Promise<CredentialRecord | undefined>;
+  createOAuthTransaction(input: Omit<OAuthTransactionRecord, "createdAt">): Promise<OAuthTransactionRecord>;
+  consumeOAuthTransaction(state: string, owner: string): Promise<OAuthTransactionRecord | undefined>;
   createApproval(input: Omit<ApprovalRecord, "createdAt" | "status"> & Partial<Pick<ApprovalRecord, "createdAt" | "status">>): Promise<ApprovalRecord>;
   listApprovals(owner: string, statuses?: ApprovalStatus[]): Promise<ApprovalRecord[]>;
   getApproval(id: string, owner: string): Promise<ApprovalRecord | undefined>;
@@ -265,12 +295,14 @@ type StoreData = {
   agents: AgentRecord[];
   approvals: ApprovalRecord[];
   integrations: IntegrationRecord[];
+  credentials: CredentialRecord[];
+  oauthTransactions: OAuthTransactionRecord[];
   checkpoints: ExecutionCheckpoint[];
 };
 
 const emptyData = (): StoreData => ({
   conversations: [], messages: [], runs: [], events: [], toolExecutions: [],
-  approvals: [], projects: [], memories: [], artifacts: [], files: [], knowledgeChunks: [], agents: [], integrations: [], checkpoints: [],
+  approvals: [], projects: [], memories: [], artifacts: [], files: [], knowledgeChunks: [], agents: [], integrations: [], checkpoints: [], credentials: [], oauthTransactions: [],
 });
 
 const locks = new Map<string, Promise<void>>();
@@ -731,6 +763,48 @@ export class WorkspaceStore implements PersistenceAdapter {
       if (index < 0) return false;
       this.data.integrations.splice(index, 1);
       return true;
+    });
+  }
+
+  async createCredential(input: Omit<CredentialRecord, "createdAt" | "updatedAt">): Promise<CredentialRecord> {
+    return this.mutate(() => {
+      const now = new Date().toISOString();
+      const record = { ...input, createdAt: now, updatedAt: now };
+      this.data.credentials = this.data.credentials.filter((item) => !(item.integrationId === input.integrationId && item.owner === input.owner));
+      this.data.credentials.push(record);
+      return record;
+    });
+  }
+
+  async getCredential(integrationId: string, owner: string): Promise<CredentialRecord | undefined> {
+    await this.load();
+    return this.data.credentials.find((item) => item.integrationId === integrationId && item.owner === owner && !item.revokedAt);
+  }
+
+  async revokeCredential(integrationId: string, owner: string): Promise<CredentialRecord | undefined> {
+    return this.mutate(() => {
+      const credential = this.data.credentials.find((item) => item.integrationId === integrationId && item.owner === owner);
+      if (!credential) return undefined;
+      credential.revokedAt = new Date().toISOString();
+      credential.updatedAt = credential.revokedAt;
+      return credential;
+    });
+  }
+
+  async createOAuthTransaction(input: Omit<OAuthTransactionRecord, "createdAt">): Promise<OAuthTransactionRecord> {
+    return this.mutate(() => {
+      const record = { ...input, createdAt: new Date().toISOString() };
+      this.data.oauthTransactions.push(record);
+      return record;
+    });
+  }
+
+  async consumeOAuthTransaction(state: string, owner: string): Promise<OAuthTransactionRecord | undefined> {
+    return this.mutate(() => {
+      const transaction = this.data.oauthTransactions.find((item) => item.state === state && item.owner === owner);
+      if (!transaction || transaction.consumedAt || Date.parse(transaction.expiresAt) <= Date.now()) return undefined;
+      transaction.consumedAt = new Date().toISOString();
+      return transaction;
     });
   }
 

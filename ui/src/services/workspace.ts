@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import type { ChatModel } from './api/types.js'
 import { setModel } from './settings.js'
 import { useSettings } from './settings.js'
-import { API_ORIGIN } from './api/client.js'
+import { API_ORIGIN, listConnectors } from './api/client.js'
 
 export type WorkspaceTab = 'models' | 'skills' | 'tools' | 'plugins' | 'mcp' | 'connectors'
 export type IntegrationKind = 'plugin' | 'connector' | 'mcp'
@@ -20,7 +20,7 @@ export type Integration = {
   description: string
   kind: IntegrationKind
   enabled: boolean
-  status: 'connected' | 'available'
+  status: 'connected' | 'available' | 'not_connected' | 'awaiting_authorization' | 'disconnected' | 'error'
   detail?: string
   version?: string
 }
@@ -191,6 +191,22 @@ export const refreshGatewayCapabilities = async () => {
       const body = await integrationsResponse.json() as { integrations?: Array<Integration & { id: string }> }
       useWorkspace.setState({ integrations: [...integrations, ...(body.integrations ?? []).filter((item) => !integrations.some((current) => current.id === item.id))] })
     }
+    const connectorResponse = await listConnectors()
+    const connectorIntegrations = connectorResponse.map((connector) => ({
+      id: connector.integrationId ?? `connector:${connector.id}`,
+      name: connector.displayName,
+      description: connector.description,
+      kind: 'connector' as const,
+      enabled: connector.enabled,
+      status: connector.status as Integration['status'],
+      detail: connector.operations.length ? `${connector.operations.length} capabilities available` : 'Provider setup pending',
+    }))
+    const merged = [...useWorkspace.getState().integrations.filter((item) => item.kind !== 'connector')]
+    for (const connector of connectorIntegrations) {
+      merged.push(connector)
+    }
+    write('deepseek-ui:integrations', merged)
+    useWorkspace.setState({ integrations: merged })
   } catch {
     useWorkspace.setState({ gatewayOnline: false })
   }

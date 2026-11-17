@@ -74,6 +74,7 @@ export const request = async (url: string, init: RequestInit): Promise<Response>
     if (init.signal?.aborted) {
       throw error
     }
+
     throw new ApiError('network', error instanceof Error ? error.message : String(error))
   }
   if (!response.ok) {
@@ -81,6 +82,25 @@ export const request = async (url: string, init: RequestInit): Promise<Response>
   }
   return response
 }
+
+export type ConnectorStatus = {
+  id: string
+  displayName: string
+  description: string
+  auth: string
+  scopes: string[]
+  operations: Array<{ id: string; name: string; description: string; readOnly: boolean; permissionClass: string }>
+  status: string
+  integrationId?: string
+  enabled: boolean
+}
+
+export const listConnectors = async (signal?: AbortSignal): Promise<ConnectorStatus[]> => {
+  const response = await request(`${API_ORIGIN}/connectors`, { method: 'GET', signal })
+  const body = await response.json() as { connectors?: ConnectorStatus[] }
+  return body.connectors ?? []
+}
+
 
 const anthropicHeaders = (apiKey: string, beta: boolean): Record<string, string> => ({
   // DeepSeek 兼容接口的鉴权方式，也可使用 Authorization: Bearer。

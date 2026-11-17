@@ -126,9 +126,27 @@ bounded observations, and gateway health/capability discovery.
 versions, web research, user/project/agent memory controls, evaluation
 scenarios, cost dashboards, OpenTelemetry export, and a production auth layer.
 
+### Connector foundation
+
+**Implemented:** A unified connector definition/operation registry now
+supports GitHub capability discovery and executable repository listing, file
+reads, and approval-classified issue creation. Connector tools enter the
+existing Agent allowlist, schema validation, approval, journal, checkpoint,
+and recovery path. OAuth transactions use expiring owner-bound state and PKCE
+verifier records; callbacks are one-time and cannot be consumed by another
+owner. Access tokens are encrypted with AES-256-GCM and are never returned by
+integration or connector APIs.
+
+**Guardrail:** Real connector credential operations require trusted
+server-side identity (`GATEWAY_API_KEY` plus `GATEWAY_OWNER`) and
+`CREDENTIAL_ENCRYPTION_KEY`. The existing client workspace header remains
+available only for local/mock resource tests and cannot authorize connector
+credentials. Google Drive and Notion are capability registrations only until
+their provider-specific OAuth and resource selection flows are configured.
+
 ## Validation results
 
-- Root tests: **21 passed, 0 failed**
+- Root tests: **28 passed, 0 failed**
 - Root TypeScript type-check: **passed**
 - UI TypeScript type-check: **passed**
 - UI lint: **0 warnings, 0 errors**
@@ -145,6 +163,9 @@ scenarios, cost dashboards, OpenTelemetry export, and a production auth layer.
 - Agent ecosystem integration: agent CRUD/versioning, owner isolation, selected
   agent execution, managed skill lifecycle, real tool/skill discovery, and
   gateway policy boundaries are covered.
+- Connector foundation: credential encryption/decryption, OAuth state
+  ownership and replay protection, connector capability metadata, and tool
+  permission classification are covered.
 
 ## Configuration and external dependencies
 
@@ -156,6 +177,9 @@ scenarios, cost dashboards, OpenTelemetry export, and a production auth layer.
 - Remote Streamable HTTP MCP requires explicit HTTPS configuration; private/local
   DNS targets, URL credentials, and redirects are rejected. OAuth is not yet
   interactive.
+- Connector setup requires the variables in `.env.example`. No plaintext token
+  fallback exists. GitHub OAuth needs a registered HTTPS callback and client
+  credentials; Drive and Notion are not yet executable.
 - The JSON store defaults to `.deepseek-ui/workspace.json`; use `dataFile` to
   place it elsewhere.
 

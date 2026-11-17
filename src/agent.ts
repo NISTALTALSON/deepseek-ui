@@ -4,6 +4,7 @@ import { Permissions } from "./permissions.js";
 import { SkillRegistry } from "./skills.js";
 import type { Message, ToolCall, ToolSpec } from "./types.js";
 import type { PermissionClass } from "./permissions.js";
+import { connectorToolSpecs } from "./connectors.js";
 
 type JsonSchema = Record<string, unknown>;
 
@@ -76,6 +77,8 @@ export interface AgentDeps {
   allowedTools?: ReadonlySet<string>;
   requestApproval?: (input: { call: ToolCall; args: unknown; spec: ToolSpec; permissionClass: PermissionClass }) => Promise<{ approvalId: string; expiresAt: string; wait: Promise<boolean> }>;
   initialMessages?: Message[];
+  enabledConnectors?: ReadonlySet<string>;
+  connectorExecute?: (name: string, args: Record<string, unknown>, signal?: AbortSignal) => Promise<string>;
 }
 
 const messageChars = (message: Message): number => JSON.stringify(message).length;
@@ -142,6 +145,7 @@ export class Agent {
         permissionClass: "read-only",
       });
     }
+    t.push(...connectorToolSpecs(this.d.enabledConnectors));
     return this.d.allowedTools
       ? t.filter((tool) => this.d.allowedTools!.has(tool.name))
       : t;
@@ -175,6 +179,8 @@ export class Agent {
         }
       } else if (name === "knowledge_search" && this.d.knowledgeSearch) {
         out = await this.d.knowledgeSearch((args as { query: string }).query);
+      } else if (name.startsWith("connector__") && this.d.connectorExecute) {
+        out = await this.d.connectorExecute(name, args as Record<string, unknown>, signal);
       } else if (this.d.mcp.owns(name)) {
         out = await this.d.mcp.call(name, args, signal);
       } else {
@@ -223,6 +229,8 @@ export class Agent {
             ? !this.d.enabledSkills || this.d.enabledSkills.has((args as { name?: string }).name ?? "")
             : name === "knowledge_search"
               ? Boolean(this.d.knowledgeSearch)
+            : name.startsWith("connector__")
+              ? Boolean(this.d.enabledConnectors?.has(name.split("__", 2)[1]))
             : this.d.enabledMcpServers?.has(name.split("__", 1)[0]) ?? false;
         const spec = this.toolSpec(name);
         const policy = this.d.permissions.decide(name);
