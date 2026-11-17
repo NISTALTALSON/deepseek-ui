@@ -80,6 +80,45 @@ test("durable approvals use compare-and-set decisions and expire safely", async 
       id: "approval-expired",
       expiresAt: new Date(Date.now() - 1_000).toISOString(),
     });
+
+    test("execution checkpoints are versioned, ordered, integrity-checked, and leased", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "deepseek-ui-checkpoint-"));
+      const store = new WorkspaceStore(join(directory, "workspace.json"));
+      try {
+        await store.load();
+        const run = await store.createRun({ owner: "alice", conversationId: "conversation-1", provider: "mock", model: "mock" });
+        const lease = await store.acquireRunLease(run.id, "worker-a");
+        assert.equal(lease?.lease?.owner, "worker-a");
+        assert.equal((await store.acquireRunLease(run.id, "worker-b")), undefined);
+        const first = await store.createCheckpoint({
+          runId: run.id,
+          conversationId: run.conversationId,
+          owner: "alice",
+          phase: "awaiting_model",
+          agentConfig: { agentId: "agent-1" },
+          providerId: "mock",
+          modelId: "mock",
+          modelParameters: {},
+          messages: [{ role: "user", content: "hello" }],
+          pendingToolCalls: [],
+          completedToolExecutionIds: [],
+          toolResults: {},
+          approvalIds: [],
+          context: {},
+        });
+        const second = await store.createCheckpoint({
+          ...first,
+          phase: "model_response_received",
+          messages: [{ role: "user", content: "hello" }, { role: "assistant", content: "world" }],
+        });
+        assert.equal(second.sequence, first.sequence + 1);
+        assert.equal((await store.latestCheckpoint(run.id, "alice"))?.id, second.id);
+        assert.equal((await store.latestCheckpoint(run.id, "bob")), undefined);
+        assert.equal((await store.releaseRunLease(run.id, "worker-a"))?.lease, undefined);
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
     const expiredDecision = await store.decideApproval(expired.id, "alice", "approved", "alice");
     assert.equal(expiredDecision?.status, "expired");
   } finally {

@@ -1,8 +1,24 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import type { Message, ToolCall } from "./types.js";
 
 export type RunStatus = "queued" | "running" | "awaiting_approval" | "paused" | "completed" | "failed" | "cancelled" | "expired";
+export type ExecutionPhase =
+  | "initialized"
+  | "awaiting_model"
+  | "model_response_received"
+  | "tool_proposed"
+  | "awaiting_approval"
+  | "tool_ready"
+  | "tool_running"
+  | "tool_result_persisted"
+  | "awaiting_model_continuation"
+  | "paused"
+  | "completed"
+  | "failed"
+  | "requires_reconciliation"
+  | "cancelled";
 
 export type WorkspaceEvent = {
   id: string;
@@ -40,6 +56,30 @@ export type RunRecord = {
   completedAt?: string;
   error?: string;
   usage?: Record<string, number>;
+  lease?: { owner: string; acquiredAt: string; expiresAt: string };
+};
+
+export type ExecutionCheckpoint = {
+  id: string;
+  runId: string;
+  conversationId: string;
+  owner: string;
+  sequence: number;
+  phase: ExecutionPhase;
+  agentConfig: Record<string, unknown>;
+  providerId: string;
+  modelId: string;
+  modelParameters: Record<string, unknown>;
+  messages: Message[];
+  pendingToolCalls: ToolCall[];
+  completedToolExecutionIds: string[];
+  toolResults: Record<string, string>;
+  approvalIds: string[];
+  context: Record<string, unknown>;
+  version: 1;
+  createdAt: string;
+  updatedAt: string;
+  integrityHash: string;
 };
 
 export type ToolExecutionRecord = {
@@ -169,6 +209,8 @@ export interface PersistenceAdapter {
   createRun(input: Pick<RunRecord, "conversationId" | "provider" | "model"> & Partial<Pick<RunRecord, "owner">>): Promise<RunRecord>;
   updateRun(id: string, patch: Partial<RunRecord>): Promise<RunRecord | undefined>;
   getRun(id: string): Promise<RunRecord | undefined>;
+  acquireRunLease(id: string, owner: string, ttlMs?: number): Promise<RunRecord | undefined>;
+  releaseRunLease(id: string, owner: string): Promise<RunRecord | undefined>;
   appendEvent(runId: string, conversationId: string, type: string, payload: Record<string, unknown>): Promise<WorkspaceEvent>;
   events(runId: string, after?: number): Promise<WorkspaceEvent[]>;
   runs(owner?: string): Promise<RunRecord[]>;
@@ -202,7 +244,11 @@ export interface PersistenceAdapter {
   getApproval(id: string, owner: string): Promise<ApprovalRecord | undefined>;
   decideApproval(id: string, owner: string, decision: "approved" | "denied", actor: string): Promise<ApprovalRecord | undefined>;
   updateApproval(id: string, owner: string, patch: Partial<ApprovalRecord>): Promise<ApprovalRecord | undefined>;
-}
+  createCheckpoint(input: Omit<ExecutionCheckpoint, "id" | "sequence" | "createdAt" | "updatedAt" | "integrityHash" | "version">): Promise<ExecutionCheckpoint>;
+  latestCheckpoint(runId: string, owner: string): Promise<ExecutionCheckpoint | undefined>;
+  checkpointHistory(runId: string, owner: string): Promise<ExecutionCheckpoint[]>;
+  getCheckpoint(id: string, owner: string): Promise<ExecutionCheckpoint | undefined>;
+};
 
 type StoreData = {
   conversations: ConversationRecord[];
@@ -218,11 +264,12 @@ type StoreData = {
   agents: AgentRecord[];
   approvals: ApprovalRecord[];
   integrations: IntegrationRecord[];
+  checkpoints: ExecutionCheckpoint[];
 };
 
 const emptyData = (): StoreData => ({
   conversations: [], messages: [], runs: [], events: [], toolExecutions: [],
-  approvals: [], projects: [], memories: [], artifacts: [], files: [], knowledgeChunks: [], agents: [], integrations: [],
+  approvals: [], projects: [], memories: [], artifacts: [], files: [], knowledgeChunks: [], agents: [], integrations: [], checkpoints: [],
 });
 
 const locks = new Map<string, Promise<void>>();
@@ -274,6 +321,30 @@ export class WorkspaceStore implements PersistenceAdapter {
       release();
       if (locks.get(this.filePath) === lockToken) locks.delete(this.filePath);
     }
+  }
+
+  private checkpointIntegrityPayload(checkpoint: Omit<ExecutionCheckpoint, "integrityHash">): string {
+      return JSON.stringify({
+        id: checkpoint.id,
+        runId: checkpoint.runId,
+        conversationId: checkpoint.conversationId,
+        owner: checkpoint.owner,
+        sequence: checkpoint.sequence,
+        phase: checkpoint.phase,
+        agentConfig: checkpoint.agentConfig,
+        providerId: checkpoint.providerId,
+        modelId: checkpoint.modelId,
+        modelParameters: checkpoint.modelParameters,
+        messages: checkpoint.messages,
+        pendingToolCalls: checkpoint.pendingToolCalls,
+        completedToolExecutionIds: checkpoint.completedToolExecutionIds,
+        toolResults: checkpoint.toolResults,
+        approvalIds: checkpoint.approvalIds,
+        context: checkpoint.context,
+        version: checkpoint.version,
+        createdAt: checkpoint.createdAt,
+        updatedAt: checkpoint.updatedAt,
+      });
   }
 
   async conversation(input: Partial<ConversationRecord> = {}): Promise<ConversationRecord> {
@@ -330,6 +401,29 @@ export class WorkspaceStore implements PersistenceAdapter {
   async getRun(id: string): Promise<RunRecord | undefined> {
     await this.load();
     return this.data.runs.find((run) => run.id === id);
+  }
+
+  async acquireRunLease(id: string, owner: string, ttlMs = 30_000): Promise<RunRecord | undefined> {
+    return this.mutate(() => {
+      const run = this.data.runs.find((item) => item.id === id);
+      if (!run) return undefined;
+      const now = Date.now();
+      if (run.lease && run.lease.owner !== owner && Date.parse(run.lease.expiresAt) > now) return undefined;
+      const acquiredAt = new Date(now).toISOString();
+      run.lease = { owner, acquiredAt, expiresAt: new Date(now + ttlMs).toISOString() };
+      run.updatedAt = acquiredAt;
+      return run;
+    });
+  }
+
+  async releaseRunLease(id: string, owner: string): Promise<RunRecord | undefined> {
+    return this.mutate(() => {
+      const run = this.data.runs.find((item) => item.id === id);
+      if (!run || run.lease?.owner !== owner) return run;
+      delete run.lease;
+      run.updatedAt = new Date().toISOString();
+      return run;
+    });
   }
 
   async appendEvent(runId: string, conversationId: string, type: string, payload: Record<string, unknown>): Promise<WorkspaceEvent> {
@@ -686,5 +780,37 @@ export class WorkspaceStore implements PersistenceAdapter {
       Object.assign(approval, mutable, { id: approval.id, owner: approval.owner });
       return approval;
     });
+  }
+
+  async createCheckpoint(input: Omit<ExecutionCheckpoint, "id" | "sequence" | "createdAt" | "updatedAt" | "integrityHash" | "version">): Promise<ExecutionCheckpoint> {
+    return this.mutate(() => {
+      const now = new Date().toISOString();
+      const sequence = this.data.checkpoints.filter((checkpoint) => checkpoint.runId === input.runId).length;
+      const base = { ...input, id: randomUUID(), sequence, createdAt: now, updatedAt: now, version: 1 as const };
+      const integrityHash = createHash("sha256").update(this.checkpointIntegrityPayload(base)).digest("hex");
+      const checkpoint: ExecutionCheckpoint = { ...base, integrityHash };
+      this.data.checkpoints.push(checkpoint);
+      return checkpoint;
+    });
+  }
+
+  async latestCheckpoint(runId: string, owner: string): Promise<ExecutionCheckpoint | undefined> {
+    await this.load();
+    return [...this.data.checkpoints]
+      .filter((checkpoint) => checkpoint.runId === runId && checkpoint.owner === owner)
+      .sort((a, b) => b.sequence - a.sequence)
+      .find((checkpoint) => createHash("sha256").update(this.checkpointIntegrityPayload(checkpoint)).digest("hex") === checkpoint.integrityHash);
+  }
+
+  async checkpointHistory(runId: string, owner: string): Promise<ExecutionCheckpoint[]> {
+    await this.load();
+    return this.data.checkpoints
+      .filter((checkpoint) => checkpoint.runId === runId && checkpoint.owner === owner)
+      .sort((a, b) => a.sequence - b.sequence);
+  }
+
+  async getCheckpoint(id: string, owner: string): Promise<ExecutionCheckpoint | undefined> {
+    await this.load();
+    return this.data.checkpoints.find((checkpoint) => checkpoint.id === id && checkpoint.owner === owner);
   }
 }
