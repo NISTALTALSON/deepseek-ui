@@ -6,11 +6,14 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/cli.ts",
+    "gateway": "tsx src/gateway.ts",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test test/*.test.ts"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0"
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "mammoth": "^1.13.0",
+    "pdf-parse": "^2.4.5"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

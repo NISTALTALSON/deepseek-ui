@@ -25,6 +25,11 @@ import { CollapsedSider } from '../components/sider/CollapsedSider.js'
 import { closeMobileSider } from '../components/sider/mobileSiderState.js'
 import { MobileSider, Sider } from '../components/sider/Sider.js'
 import styles from './App.module.css'
+import { WorkspaceDialog } from '../components/workspace/WorkspaceDialog.js'
+import { ProjectWorkspace } from '../components/projects/ProjectWorkspace.js'
+import { closeProjects, useProjectDialog } from '../components/projects/projectDialogState.js'
+import { AgentBuilder } from '../components/agents/AgentBuilder.js'
+import { loadAgents } from '../services/agents.js'
 
 export const App = () => {
   const t = useTranslate()
@@ -49,6 +54,7 @@ export const App = () => {
     state.activeId === null ? false : Object.hasOwn(state.streaming, state.activeId)
   )
   const activeId = useChatStore((state) => state.activeId)
+  const projectsOpen = useProjectDialog((state) => state.open)
 
   usePreventPageScroll(isMobile)
 
@@ -69,6 +75,7 @@ export const App = () => {
 
   useEffect(() => {
     void initChat()
+    void loadAgents()
     // 首次打开先在设置里输入 API Key
     ensureApiKey()
   }, [])
@@ -133,6 +140,9 @@ export const App = () => {
         <SearchPanel />
       </div>
       <SettingsDialog />
+      <WorkspaceDialog />
+      <ProjectWorkspace open={projectsOpen} onClose={closeProjects} />
+      <AgentBuilder />
       <Toast />
     </>
   )

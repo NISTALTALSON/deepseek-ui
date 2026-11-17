@@ -1,10 +1,13 @@
 import { create } from 'zustand'
 import { createId } from '../../utils/id.js'
-import { ApiError, streamMessage } from '../api/client.js'
+import { ApiError, listRuns, streamMessage } from '../api/client.js'
 import type { ChatModel, CreateMessageRequest } from '../api/types.js'
 import { extractFileIds, getFileErrorCode, isRetryableApiError } from '../api/errors.js'
 import { cancelUpload, describeUploadError, uploadAttachment, useUploads } from '../attachments.js'
 import { useSettings } from '../settings.js'
+import { useWorkspace } from '../workspace.js'
+import { useProjects } from '../projects.js'
+import { useAgents } from '../agents.js'
 import { appendBranch, getVisibleMessages, normalizeSession, selectVersion } from './branches.js'
 import * as db from './db.js'
 import {
@@ -103,7 +106,13 @@ const getStreamController = (id: string) => {
 }
 
 const sameSummary = (a: SessionSummary, b: SessionSummary) =>
-  a.title === b.title && a.createdAt === b.createdAt && a.updatedAt === b.updatedAt
+  a.title === b.title &&
+  a.createdAt === b.createdAt &&
+  a.updatedAt === b.updatedAt &&
+  a.pinned === b.pinned &&
+  a.archived === b.archived &&
+  a.folder === b.folder &&
+  a.projectId === b.projectId
 
 const sessionAccess = new Map<string, number>()
 const unsavedSessions = new Set<string>()
@@ -255,12 +264,12 @@ export const bindChatPersistence = () => {
 
 /** 按当前开关创建回复：深度思考对应 thinking，智能搜索控制 deepseek_web_search。 */
 const createReply = (): AssistantMessage => {
-  const { thinking, search } = useSettings.getState()
+  const { thinking, search, model } = useSettings.getState()
   return {
     id: createId(),
     role: 'assistant',
     createdAt: Date.now(),
-    model: MODEL,
+    model: useWorkspace.getState().model ?? model,
     thinking,
     search,
     prefix: true,
@@ -278,6 +287,7 @@ const settleInterrupted = (session: Session): Session => {
   ) {
     return session
   }
+
   return {
     ...session,
     messages: session.messages.map((m) =>
@@ -285,6 +295,60 @@ const settleInterrupted = (session: Session): Session => {
         ? settleReply(m, 'stopped', session.updatedAt)
         : m
     ),
+  }
+}
+
+const settleRecoveredRun = (session: Session, status: string, error?: string): Session => ({
+  ...session,
+  messages: session.messages.map((message) => {
+    if (
+      message.role !== 'assistant' ||
+      (message.status !== 'pending' && message.status !== 'streaming')
+    ) {
+      return message
+    }
+    return {
+      ...settleReply(message, status === 'cancelled' ? 'stopped' : 'error', Date.now()),
+      error: {
+        kind: 'interrupted',
+        message:
+          error ??
+          (status === 'paused'
+            ? 'This run was interrupted by a gateway restart and is paused for recovery.'
+            : `This run ended with status: ${status}.`),
+      },
+    }
+  }),
+})
+
+const reconcileSessionRun = async (id: string, session: Session) => {
+  if (
+    !session.messages.some(
+      (message) =>
+        message.role === 'assistant' &&
+        (message.status === 'pending' || message.status === 'streaming')
+    )
+  ) {
+    return
+  }
+  try {
+    const runs = await listRuns(useSettings.getState().apiKey ?? '', 'local')
+    const run = runs
+      .filter((candidate) => candidate.conversationId === id)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
+    if (
+      !run ||
+      run.status === 'running' ||
+      run.status === 'queued' ||
+      run.status === 'awaiting_approval'
+    ) {
+      return
+    }
+    const recovered = settleRecoveredRun(session, run.status, run.error)
+    updateSession(id, () => recovered)
+    persist(id)
+  } catch {
+    // The local IndexedDB history remains usable when the optional gateway is offline.
   }
 }
 
@@ -351,6 +415,7 @@ const ensureSessionLoaded = (id: string): Promise<void> => {
       if (session !== stored) {
         persist(id)
       }
+      void reconcileSessionRun(id, session)
       trimSessionCache()
     } catch (error) {
       if (epoch === historyEpoch && sessionLoads.get(id) === load) {
@@ -487,6 +552,32 @@ export const removeSession = (id: string): Promise<boolean> => {
   return task
 }
 
+const updateSessionMetadata = async (
+  id: string,
+  metadata: Pick<Session, 'pinned' | 'archived' | 'folder'>
+) => {
+  try {
+    await db.updateSessionMetadata(id, metadata)
+    updateSession(id, (session) => ({ ...session, ...metadata }))
+    set((state) => ({
+      sessions: state.sessions.map((summary) =>
+        summary.id === id ? { ...summary, ...metadata } : summary
+      ),
+    }))
+    return true
+  } catch {
+    return false
+  }
+}
+
+export const togglePinned = async (id: string, pinned: boolean) => {
+  return updateSessionMetadata(id, { pinned })
+}
+
+export const toggleArchived = async (id: string, archived: boolean) => {
+  return updateSessionMetadata(id, { archived })
+}
+
 const removeSessionData = async (id: string): Promise<boolean> => {
   if (get().importingHistory || deletingSessions.has(id)) {
     return false
@@ -570,6 +661,7 @@ export const sendMessage = (targetSessionId: string | null) => {
       updatedAt: now,
       messages: [],
       rootMessageId: null,
+      projectId: useProjects.getState().selectedProjectId,
     }
     sessionId = session.id
     touchSession(session.id)
@@ -709,7 +801,7 @@ export const continueReply = (sessionId: string, messageId: string) => {
   const reply: AssistantMessage = {
     ...previous,
     // 未记录请求配置的回复，续写时使用默认模型和当前开关。
-    model: previous.model ?? MODEL,
+    model: previous.model ?? useSettings.getState().model ?? MODEL,
     thinking: previous.thinking ?? thinking,
     search: previous.search ?? search,
     status: 'pending',
@@ -1000,14 +1092,35 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
           useSettings.getState().apiKey ?? '',
           {
             model: initial.model ?? MODEL,
-            system: SYSTEM_PROMPT,
+            system: [
+              SYSTEM_PROMPT,
+              `Enabled skills: ${useWorkspace.getState().enabledSkills.join(', ') || 'none'}.`,
+              `Enabled integrations: ${useWorkspace
+                .getState()
+                .integrations.filter((item) => item.enabled)
+                .map((item) => item.name)
+                .join(', ') || 'none'}.`,
+            ].join('\n'),
             messages,
             thinking: { type: initial.thinking ? 'enabled' : 'disabled' },
             safety_check: SAFETY_CHECK,
             tools: serverTools(initial.search ?? false),
             ...(titleRequests.has(controller) ? { title: { enabled: true } } : {}),
           },
-          controller.signal
+          controller.signal,
+          {
+            'x-deepseek-ui-conversation': sessionId,
+            'x-deepseek-ui-workspace': 'local',
+            'x-deepseek-ui-skills': useWorkspace.getState().enabledSkills.join(','),
+            'x-deepseek-ui-integrations': useWorkspace
+              .getState()
+              .integrations.filter((item) => item.enabled)
+              .map((item) => item.id)
+              .join(','),
+            'x-deepseek-ui-provider': (initial.model ?? MODEL) === 'mock' ? 'mock' : 'deepseek',
+            ...(useAgents.getState().selectedAgentId ? { 'x-deepseek-ui-agent': useAgents.getState().selectedAgentId ?? '' } : {}),
+            ...(getSession(sessionId)?.projectId ? { 'x-deepseek-ui-project': getSession(sessionId)?.projectId } : {}),
+          }
         )
         const blockIndexes = new Map<number, number>()
         for await (const event of events) {

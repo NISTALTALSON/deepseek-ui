@@ -74,6 +74,7 @@ export const request = async (url: string, init: RequestInit): Promise<Response>
     if (init.signal?.aborted) {
       throw error
     }
+
     throw new ApiError('network', error instanceof Error ? error.message : String(error))
   }
   if (!response.ok) {
@@ -81,6 +82,25 @@ export const request = async (url: string, init: RequestInit): Promise<Response>
   }
   return response
 }
+
+export type ConnectorStatus = {
+  id: string
+  displayName: string
+  description: string
+  auth: string
+  scopes: string[]
+  operations: Array<{ id: string; name: string; description: string; readOnly: boolean; permissionClass: string }>
+  status: string
+  integrationId?: string
+  enabled: boolean
+}
+
+export const listConnectors = async (signal?: AbortSignal): Promise<ConnectorStatus[]> => {
+  const response = await request(`${API_ORIGIN}/connectors`, { method: 'GET', signal })
+  const body = await response.json() as { connectors?: ConnectorStatus[] }
+  return body.connectors ?? []
+}
+
 
 const anthropicHeaders = (apiKey: string, beta: boolean): Record<string, string> => ({
   // DeepSeek 兼容接口的鉴权方式，也可使用 Authorization: Bearer。
@@ -144,7 +164,8 @@ const hasFile = (body: CreateMessageRequest) =>
 export async function* streamMessage(
   apiKey: string,
   body: CreateMessageRequest,
-  signal: AbortSignal
+  signal: AbortSignal,
+  extraHeaders: Record<string, string> = {}
 ): AsyncGenerator<MessageStreamEvent> {
   const response = await request(`${ANTHROPIC_BASE_URL}/messages`, {
     method: 'POST',
@@ -152,6 +173,7 @@ export async function* streamMessage(
       ...anthropicHeaders(apiKey, hasFile(body)),
       'Content-Type': 'application/json',
       Accept: 'text/event-stream',
+      ...extraHeaders,
     },
     body: JSON.stringify({ ...body, stream: true }),
     signal,
@@ -160,6 +182,7 @@ export async function* streamMessage(
   if (!response.body || !contentType.includes('text/event-stream')) {
     throw await readErrorResponse(response, 'protocol', '')
   }
+
   for await (const { event: eventName, data } of readServerSentEvents(response.body, signal)) {
     let payload: unknown
     try {
@@ -186,4 +209,162 @@ export async function* streamMessage(
   }
   // 服务端没有提供错误内容时保持为空，不推测断流原因。
   throw new ApiError('interrupted', '')
+}
+
+export type RunEvent = {
+  id: string
+  version: 1
+  runId: string
+  conversationId: string
+  sequence: number
+  type: string
+  timestamp: string
+  payload: Record<string, unknown>
+}
+
+export type RunStatus =
+  | 'queued'
+  | 'running'
+  | 'awaiting_approval'
+  | 'paused'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'expired'
+
+export type RunRecord = {
+  id: string
+  conversationId: string
+  status: RunStatus
+  updatedAt: string
+  error?: string
+}
+
+export type ApprovalRecord = {
+  id: string
+  runId: string
+  conversationId: string
+  toolId: string
+  arguments: unknown
+  permissionClass: string
+  status: string
+  expiresAt: string
+  createdAt: string
+  error?: string
+}
+
+export const listApprovals = async (
+  apiKey: string,
+  workspace = 'local',
+  signal?: AbortSignal
+): Promise<ApprovalRecord[]> => {
+  const response = await request(`${API_ORIGIN}/approvals`, {
+    headers: { ...anthropicHeaders(apiKey, false), 'x-deepseek-ui-workspace': workspace },
+    signal,
+  })
+  const body = (await response.json()) as { approvals?: ApprovalRecord[] }
+  return Array.isArray(body.approvals) ? body.approvals : []
+}
+
+export const decideApproval = async (
+  apiKey: string,
+  approvalId: string,
+  decision: 'approved' | 'denied',
+  workspace = 'local'
+): Promise<ApprovalRecord> => {
+  const response = await request(`${API_ORIGIN}/approvals/${encodeURIComponent(approvalId)}`, {
+    method: 'POST',
+    headers: { ...anthropicHeaders(apiKey, false), 'content-type': 'application/json', 'x-deepseek-ui-workspace': workspace },
+    body: JSON.stringify({ decision }),
+  })
+  return ((await response.json()) as { approval: ApprovalRecord }).approval
+}
+
+export type RecoveryState = {
+  run: RunRecord
+  checkpoint?: {
+    phase: string
+    sequence: number
+    pendingToolCalls: Array<{ id: string; function: { name: string; arguments: string } }>
+    approvalIds: string[]
+  }
+  approval?: ApprovalRecord
+  recoverable: boolean
+}
+
+export const getRecoveryState = async (
+  apiKey: string,
+  runId: string,
+  workspace = 'local',
+  signal?: AbortSignal
+): Promise<RecoveryState> => {
+  const response = await request(`${API_ORIGIN}/runs/${encodeURIComponent(runId)}/recovery`, {
+    headers: { ...anthropicHeaders(apiKey, false), 'x-deepseek-ui-workspace': workspace },
+    signal,
+  })
+  return (await response.json()) as RecoveryState
+}
+
+export const resumeRun = async (
+  apiKey: string,
+  runId: string,
+  workspace = 'local'
+): Promise<RunRecord> => {
+  const response = await request(`${API_ORIGIN}/runs/${encodeURIComponent(runId)}/resume`, {
+    method: 'POST',
+    headers: { ...anthropicHeaders(apiKey, false), 'x-deepseek-ui-workspace': workspace },
+  })
+  return ((await response.json()) as { run: RunRecord }).run
+}
+
+export const listRuns = async (
+  apiKey: string,
+  workspace = 'local',
+  signal?: AbortSignal
+): Promise<RunRecord[]> => {
+  const response = await request(`${API_ORIGIN}/runs`, {
+    method: 'GET',
+    headers: {
+      ...anthropicHeaders(apiKey, false),
+      'x-deepseek-ui-workspace': workspace,
+    },
+    signal,
+  })
+  const body = (await response.json()) as { runs?: RunRecord[] }
+  return Array.isArray(body.runs) ? body.runs : []
+}
+
+/** Replays durable gateway events after a disconnect, de-duplicating event IDs. */
+export async function* streamRunEvents(
+  apiKey: string,
+  runId: string,
+  signal: AbortSignal,
+  lastEventId?: string,
+  extraHeaders: Record<string, string> = {}
+): AsyncGenerator<RunEvent> {
+  const response = await request(`${API_ORIGIN}/runs/${encodeURIComponent(runId)}/events`, {
+    method: 'GET',
+    headers: {
+      ...anthropicHeaders(apiKey, false),
+      Accept: 'text/event-stream',
+      ...(lastEventId ? { 'Last-Event-ID': lastEventId } : {}),
+      ...extraHeaders,
+    },
+    signal,
+  })
+  if (!response.body) {
+    throw new ApiError('protocol', 'Run event stream has no body', response.status)
+  }
+  const seen = new Set<string>()
+  for await (const { data } of readServerSentEvents(response.body, signal)) {
+    try {
+      const event = JSON.parse(data) as RunEvent
+      if (!seen.has(event.id)) {
+        seen.add(event.id)
+        yield event
+      }
+    } catch {
+      // Ignore malformed replay frames; the normal message stream remains authoritative.
+    }
+  }
 }

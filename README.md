@@ -29,12 +29,26 @@ Why a gateway: a browser cannot spawn MCP stdio servers or touch the filesystem.
 | Skills loader | `src/skills.ts` | unit tested |
 | Permissions | `src/permissions.ts` | unit tested |
 | Terminal harness | `src/cli.ts` | not yet run |
-| Official UI vendored, builds on Windows | `ui/` | builds (4.2 MB), not yet wired to a gateway |
-| Gateway (Anthropic Messages endpoint in front of the engine) | `src/gateway.ts` | next |
+| Official UI vendored, builds on Windows | `ui/` | builds and is wired to the local gateway |
+| Gateway (Anthropic Messages endpoint in front of the engine) | `src/gateway.ts` | implemented |
 
 Engine: `npm install --include=dev`, `DEEPSEEK_API_KEY=... npm run dev`, `npm test`.
-UI: `cd ui`, `pnpm install`, `pnpm dev` (http://localhost:8090), `pnpm build`.
+Gateway + UI: `DEEPSEEK_API_KEY=... npm run gateway` in one terminal, then `cd ui`, `pnpm install`, `pnpm dev` (http://localhost:8090) in another. The UI development build points to the local gateway by default. Set `DEEPSEEK_UI_API_ORIGIN` to use another compatible API.
 (If `NODE_ENV=production` is set globally, npm/pnpm silently skip devDependencies. Set `NODE_ENV=development` for installs.)
+
+MCP tools execute in the gateway process, never in the browser. Configure per-server
+`timeoutMs` and `retries` in `deepseek-ui.config.json`. MCP tools that advertise
+`readOnlyHint` can run concurrently when the model emits multiple independent calls.
+The DeepSeek stream requests provider usage data and forwards input/output token counts
+through the Anthropic-compatible response.
+
+The chat workspace includes a model switcher plus persistent Skills, Plugins, MCP servers, and Connectors panels. Use the model pill in a conversation header or the `Workspace` control beside the composer. MCP servers are real: configure them in `deepseek-ui.config.json`, open the workspace, enable the connected server, and the model receives only that server's namespaced tools. Gateway streams expose executed tools as structured `tool_use` blocks, while bounded results remain marked as untrusted evidence. Enabled skills are loaded from real `SKILL.md` folders and are gated server-side. Connector entries become executable when backed by an MCP server with the same id; no credentials are stored in the browser.
+
+The provider boundary is implemented in `src/provider.ts`. DeepSeek remains the
+production provider, while the explicitly labelled **Local mock** model runs
+without network access or credentials for setup, UI testing, and automation.
+The gateway can also be configured with `"provider": "mock"`; the browser's
+`mock` model selection sends the equivalent provider header per request.
 
 ## Staying free (honest version)
 
@@ -59,13 +73,12 @@ Design consequence: the engine is provider-agnostic (configurable base URL), spe
 
 ## Roadmap
 
-1. Gateway: Anthropic Messages endpoint that runs the agent loop; tool activity streamed to the UI.
-2. UI changes: tool-call cards, approve/deny prompts, skills and MCP panels, request/cost meter.
-3. Verify end to end with Desktop Commander as the first MCP server.
-4. Cache-aware context manager.
-5. Plugin manifest (skills + MCP servers + commands, one-step install).
-6. Prompt-injection hardening: tool results are untrusted data.
-7. Desktop packaging (Electron; Rust is not required).
+1. UI changes: dedicated tool-call cards, approve/deny prompts, skills and MCP panels, request/cost meter.
+2. Verify end to end with Desktop Commander as the first MCP server.
+3. Cache-aware context manager.
+4. Plugin manifest (skills + MCP servers + commands, one-step install).
+5. Prompt-injection hardening: tool results are untrusted data.
+6. Desktop packaging (Electron; Rust is not required).
 
 ## License
 

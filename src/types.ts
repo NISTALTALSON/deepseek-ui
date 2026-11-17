@@ -23,11 +23,23 @@ export type Message =
 
 export interface ToolSpec {
   name: string;
+  displayName?: string;
+  source?: "builtin" | "skill" | "mcp" | "connector";
   description: string;
   parameters: Record<string, unknown>; // JSON Schema
+  schemaFingerprint?: string;
+  availability?: "available" | "unavailable";
+  permissionClass?: "read-only" | "reversible" | "external-side-effect" | "sensitive" | "destructive";
+  readOnly?: boolean;
+  timeoutMs?: number;
+  retries?: number;
 }
 
 export type StreamEvent =
   | { type: "reasoning"; delta: string }
   | { type: "text"; delta: string }
-  | { type: "done"; message: AssistantMessage };
+  | {
+      type: "done";
+      message: AssistantMessage;
+      usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+    };

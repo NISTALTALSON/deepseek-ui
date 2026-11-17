@@ -1,0 +1,24 @@
+.dialog { width: min(940px, calc(100vw - 32px)); }
+.main { padding: 0; }
+.layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); min-height: 560px; }
+.sidebar { padding: 14px; border-right: 1px solid var(--dsw-alias-border-l1); }
+.sidebarTop, .filesHeader, .actions, .editorHeader { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sidebarTop input, .editor input, .editor textarea { box-sizing: border-box; width: 100%; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; padding: 8px 10px; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); font: inherit; }
+.sidebarTop input { min-width: 0; }
+.project { display: grid; gap: 3px; width: 100%; margin-top: 8px; padding: 10px; border: 0; border-radius: 9px; background: transparent; color: var(--dsw-alias-label-primary); text-align: left; cursor: pointer; }
+.project:hover, .selected { background: var(--dsw-alias-fill-tertiary); }
+.project span, .editorHeader p, .empty, .file small { color: var(--dsw-alias-label-tertiary); font-size: 12px; }
+.editor { min-width: 0; padding: 20px; overflow: auto; }
+.editorHeader { align-items: flex-start; margin-bottom: 18px; }
+.editor h2, .editor h3 { margin: 0; color: var(--dsw-alias-label-primary); }
+.editor label { display: grid; gap: 6px; margin: 12px 0; color: var(--dsw-alias-label-secondary); font-size: 12px; }
+.editor textarea { resize: vertical; }
+.actions { justify-content: flex-start; margin: 18px 0 24px; }
+.files { border-top: 1px solid var(--dsw-alias-border-l1); padding-top: 18px; }
+.conversationHistory { margin-bottom: 20px; }
+.conversationHistory h3 { margin-bottom: 8px; }
+.conversation { display: flex; justify-content: space-between; gap: 8px; width: 100%; padding: 8px 0; border: 0; border-bottom: 1px solid var(--dsw-alias-border-l2); background: transparent; color: var(--dsw-alias-label-primary); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.conversation small { color: var(--dsw-alias-label-tertiary); }
+.file { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto auto; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--dsw-alias-border-l2); color: var(--dsw-alias-label-primary); font-size: 13px; }
+.empty { padding: 18px 4px; text-align: center; }
+@media (max-width: 720px) { .layout { grid-template-columns: 1fr; } .sidebar { border-right: 0; border-bottom: 1px solid var(--dsw-alias-border-l1); max-height: 210px; overflow: auto; } .editor { padding: 16px; } }

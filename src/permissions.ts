@@ -2,10 +2,12 @@
 // First matching rule wins; anything unmatched falls back to `default`.
 
 export type Decision = "allow" | "ask" | "deny";
+export type PermissionClass = "read-only" | "reversible" | "external-side-effect" | "sensitive" | "destructive";
 
 export interface Rule {
   tool: string; // glob: "*" matches anything, "fs__*" matches a prefix
   decision: Decision;
+  permissionClass?: PermissionClass;
 }
 
 export interface PolicyConfig {
@@ -28,6 +30,14 @@ export class Permissions {
       if (globToRegExp(r.tool).test(tool)) return r.decision;
     }
     return this.cfg.default;
+  }
+
+  hasRule(tool: string): boolean {
+    return this.cfg.rules.some((rule) => globToRegExp(rule.tool).test(tool));
+  }
+
+  async authorizeSelected(tool: string, args: unknown, _selected: boolean): Promise<boolean> {
+    return this.authorize(tool, args);
   }
 
   async authorize(tool: string, args: unknown): Promise<boolean> {

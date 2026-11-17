@@ -15,6 +15,56 @@
   background: var(--dsw-alias-bg-base);
 }
 
+.activityButton {
+  margin-left: auto;
+  padding: 7px 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.activityButton:hover {
+  background: var(--dsw-alias-fill-tertiary);
+  color: var(--dsw-alias-label-primary);
+}
+
+.content {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+}
+
+.content > :first-child {
+  min-width: 0;
+  flex: 1;
+}
+
+.modelButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-fill-tertiary);
+  font: var(--dsw-font-s-strong-14);
+  cursor: pointer;
+}
+
+.modelButton:hover {
+  background: var(--dsw-alias-fill-secondary);
+}
+
+.modelChevron {
+  color: var(--dsw-alias-label-tertiary);
+}
+
 .title {
   max-width: 480px;
   padding: 8px 12px;

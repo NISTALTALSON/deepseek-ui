@@ -1,0 +1,24 @@
+{
+  "port": 8787,
+  "allowedOrigins": ["http://localhost:8090", "http://127.0.0.1:8090"],
+  "model": "deepseek-v4-pro",
+  "provider": "deepseek",
+  "maxRetries": 2,
+  "mcp": {
+    "servers": {
+      "filesystem": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "C:/workspace"],
+        "timeoutMs": 30000,
+        "retries": 1
+      }
+    }
+  },
+  "policy": {
+    "rules": [
+      { "tool": "load_skill", "decision": "allow" }
+    ],
+    "default": "ask"
+  },
+  "skills": ["./skills"]
+}

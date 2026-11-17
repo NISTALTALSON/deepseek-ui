@@ -114,6 +114,31 @@ export const renameSession = async (id: string, title: string): Promise<void> =>
           await sessions.put(session)
           await tx.objectStore('sessionSummaries').put(storedSummary(session))
         }
+
+      } catch (error) {
+        abortTransaction(tx)
+        throw error
+      }
+    })(),
+    tx.done,
+  ])
+}
+
+export const updateSessionMetadata = async (
+  id: string,
+  metadata: Pick<Session, 'pinned' | 'archived' | 'folder'>
+): Promise<void> => {
+  const tx = (await getDB()).transaction(['sessions', 'sessionSummaries'], 'readwrite')
+  await Promise.all([
+    (async () => {
+      try {
+        const sessions = tx.objectStore('sessions')
+        const session = await sessions.get(id)
+        if (session) {
+          Object.assign(session, metadata)
+          await sessions.put(session)
+          await tx.objectStore('sessionSummaries').put(storedSummary(session))
+        }
       } catch (error) {
         abortTransaction(tx)
         throw error

@@ -11,6 +11,8 @@ import { IconButton } from '../base/IconButton.js'
 import { Modal } from '../base/Modal.js'
 import { showToast } from '../base/toastState.js'
 import { openSettings } from '../settings/settingsDialogState.js'
+import { openProjects } from '../projects/projectDialogState.js'
+import { openAgents } from '../../services/agents.js'
 import { closeMobileSider, useMobileSider } from './mobileSiderState.js'
 import { SessionItem } from './SessionItem.js'
 import styles from './Sider.module.css'
@@ -21,9 +23,23 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
   const sessions = useChatStore((state) => state.sessions)
   const activeId = useChatStore((state) => state.activeId)
   const [now, setNow] = useState(Date.now)
-  const groups = useMemo(() => groupSessions(sessions, now, t), [sessions, now, t])
   const [deleting, setDeleting] = useState<SessionSummary | null>(null)
   const [deletePending, setDeletePending] = useState(false)
+  const [query, setQuery] = useState('')
+  const [showArchived, setShowArchived] = useState(false)
+  const visibleSessions = useMemo(() => {
+    const normalized = query.trim().toLowerCase()
+    return sessions.filter((session) => {
+      if (session.archived !== showArchived) {
+        return false
+      }
+      return !normalized || session.title.toLowerCase().includes(normalized)
+    })
+  }, [query, sessions, showArchived])
+  const visibleGroups = useMemo(
+    () => groupSessions(visibleSessions.filter((session) => showArchived || !session.pinned), now, t),
+    [now, showArchived, t, visibleSessions]
+  )
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>
@@ -74,9 +90,31 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
         </span>
         {t('newChat')}
       </button>
+      <label className={styles.search}>
+        <span className={styles.searchIcon}>⌕</span>
+        <input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Search conversations"
+          aria-label="Search conversations"
+        />
+      </label>
+      <button type="button" className={styles.archiveToggle} onClick={() => setShowArchived((visible) => !visible)}>
+        {showArchived
+          ? 'Back to active chats'
+          : `Archived${sessions.filter((session) => session.archived).length ? ` · ${sessions.filter((session) => session.archived).length}` : ''}`}
+      </button>
       <div className={styles.listWrap}>
         <div className={styles.list}>
-          {groups.map((group) => (
+          {!showArchived && sessions.some((session) => session.pinned && !session.archived) ? (
+            <div className={styles.section}>
+              <div className={styles.sectionHeader}>Pinned</div>
+              {visibleSessions.filter((session) => session.pinned).map((session) => (
+                <SessionItem key={session.id} session={session} active={session.id === activeId} onDelete={() => setDeleting(session)} />
+              ))}
+            </div>
+          ) : null}
+          {visibleGroups.map((group) => (
             <div key={group.key} className={styles.section}>
               <div className={styles.sectionHeader}>{group.label}</div>
               {group.sessions.map((session) => (
@@ -89,9 +127,18 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
               ))}
             </div>
           ))}
+          {visibleSessions.length === 0 ? <div className={styles.empty}>No conversations found.</div> : null}
         </div>
       </div>
       <div className={styles.bottom}>
+        <button type="button" className={styles.settings} onClick={() => { openAgents(); closeMobileSider() }}>
+          <span className={styles.settingsIcon}>✦</span>
+          <span className={styles.settingsLabel}>Agents</span>
+        </button>
+        <button type="button" className={styles.settings} onClick={() => { openProjects(); closeMobileSider() }}>
+          <span className={styles.settingsIcon}>▦</span>
+          <span className={styles.settingsLabel}>Projects</span>
+        </button>
         <button type="button" className={styles.settings} onClick={() => openSettings('general')}>
           <span className={styles.settingsIcon}>
             <IconSettingsOutline16 />
