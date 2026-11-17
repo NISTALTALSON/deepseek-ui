@@ -115,6 +115,23 @@
   line-height: 1;
 }
 
+.archiveToggle {
+  width: 100%;
+  margin-top: 8px;
+  padding: 5px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.archiveToggle:hover {
+  color: var(--dsw-alias-label-primary);
+}
+
 .empty {
   padding: 20px 10px;
   color: var(--dsw-alias-label-tertiary);

@@ -24,16 +24,20 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
   const [deleting, setDeleting] = useState<SessionSummary | null>(null)
   const [deletePending, setDeletePending] = useState(false)
   const [query, setQuery] = useState('')
+  const [showArchived, setShowArchived] = useState(false)
   const visibleSessions = useMemo(() => {
     const normalized = query.trim().toLowerCase()
     return sessions.filter((session) => {
-      if (session.archived) {
+      if (session.archived !== showArchived) {
         return false
       }
       return !normalized || session.title.toLowerCase().includes(normalized)
     })
-  }, [query, sessions])
-  const visibleGroups = useMemo(() => groupSessions(visibleSessions, now, t), [now, t, visibleSessions])
+  }, [query, sessions, showArchived])
+  const visibleGroups = useMemo(
+    () => groupSessions(visibleSessions.filter((session) => showArchived || !session.pinned), now, t),
+    [now, showArchived, t, visibleSessions]
+  )
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>
@@ -93,9 +97,14 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
           aria-label="Search conversations"
         />
       </label>
+      <button type="button" className={styles.archiveToggle} onClick={() => setShowArchived((visible) => !visible)}>
+        {showArchived
+          ? 'Back to active chats'
+          : `Archived${sessions.filter((session) => session.archived).length ? ` · ${sessions.filter((session) => session.archived).length}` : ''}`}
+      </button>
       <div className={styles.listWrap}>
         <div className={styles.list}>
-          {sessions.some((session) => session.pinned && !session.archived) ? (
+          {!showArchived && sessions.some((session) => session.pinned && !session.archived) ? (
             <div className={styles.section}>
               <div className={styles.sectionHeader}>Pinned</div>
               {visibleSessions.filter((session) => session.pinned).map((session) => (
@@ -114,9 +123,9 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
                   onDelete={() => setDeleting(session)}
                 />
               ))}
-              {visibleSessions.length === 0 ? <div className={styles.empty}>No conversations found.</div> : null}
             </div>
           ))}
+          {visibleSessions.length === 0 ? <div className={styles.empty}>No conversations found.</div> : null}
         </div>
       </div>
       <div className={styles.bottom}>
