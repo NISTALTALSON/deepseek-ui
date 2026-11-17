@@ -6,9 +6,9 @@ import { createProvider } from "./provider.js";
 import { McpHub, type McpConfig } from "./mcp.js";
 import { Permissions, defaultPolicy, type PolicyConfig } from "./permissions.js";
 import { SkillRegistry } from "./skills.js";
-import { WorkspaceStore, type AgentRecord, type IntegrationRecord } from "./persistence.js";
+import { WorkspaceStore, type AgentRecord, type ExecutionCheckpoint, type IntegrationRecord } from "./persistence.js";
 import { FileStorage, MAX_FILE_BYTES, processFile, validateUpload } from "./knowledge.js";
-import type { AssistantMessage, Message } from "./types.js";
+import type { AssistantMessage, Message, ToolCall } from "./types.js";
 
 export type GatewayConfig = {
   host?: string;
@@ -131,6 +131,12 @@ export const toAgentMessages = (messages: AnthropicMessage[]): Message[] =>
 const writeEvent = (res: ServerResponse, event: string, data: unknown) => {
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 };
+
+const eventToToolCall = (event: { id: string; name: string; args: unknown }): ToolCall => ({
+  id: event.id,
+  type: "function",
+  function: { name: event.name, arguments: JSON.stringify(event.args ?? {}) },
+});
 
 const proxy = async (
   req: IncomingMessage,
@@ -776,6 +782,34 @@ export const createGateway = async (config: GatewayConfig = {}) => {
     const prompt = latest?.role === "user" ? latest.content : "";
     agent.messages.push(...(latest?.role === "user" ? history.slice(0, -1) : history));
     await store.appendMessage({ conversationId, runId: run.id, role: "user", content: prompt });
+    const checkpointConfig = {
+      agentId: selectedAgent?.id,
+      systemPrompt: input.system ?? "You are a helpful assistant.",
+      projectId: selectedProjectId,
+      skillNames: [...(csvHeader(req.headers, "x-deepseek-ui-skills") ?? new Set<string>())],
+      enabledMcpServers: [...(csvHeader(req.headers, "x-deepseek-ui-integrations") ?? new Set<string>())],
+      allowedTools: selectedAgent?.allowedTools ?? [],
+    };
+    const persistCheckpoint = async (
+      phase: ExecutionCheckpoint["phase"],
+      overrides: Partial<Pick<ExecutionCheckpoint, "pendingToolCalls" | "toolResults" | "approvalIds" | "context">> = {},
+    ) => store.createCheckpoint({
+      runId: run.id,
+      conversationId,
+      owner,
+      phase,
+      agentConfig: checkpointConfig,
+      providerId: effectiveProvider,
+      modelId: effectiveModel,
+      modelParameters: { thinking: input.thinking?.type ?? "disabled", max_tokens: input.max_tokens ?? null },
+      messages: agent.messages.slice(),
+      pendingToolCalls: overrides.pendingToolCalls ?? [],
+      completedToolExecutionIds: [],
+      toolResults: overrides.toolResults ?? {},
+      approvalIds: overrides.approvalIds ?? [],
+      context: overrides.context ?? {},
+    });
+    await persistCheckpoint("awaiting_model");
 
     res.writeHead(200, {
       "content-type": "text/event-stream; charset=utf-8",
@@ -832,6 +866,7 @@ export const createGateway = async (config: GatewayConfig = {}) => {
             toolName: event.name,
             argumentsHash: createHash("sha256").update(JSON.stringify(event.args)).digest("hex"),
           });
+          await persistCheckpoint("tool_proposed", { pendingToolCalls: [eventToToolCall(event)] });
           const toolIndex = index++;
           toolIndexes.set(event.id, toolIndex);
           writeEvent(res, "content_block_start", {
@@ -841,10 +876,18 @@ export const createGateway = async (config: GatewayConfig = {}) => {
           });
         } else if (event.type === "approval_required") {
           await store.updateRun(run.id, { status: "awaiting_approval" });
+          await persistCheckpoint("awaiting_approval", {
+            pendingToolCalls: [eventToToolCall(event)],
+            approvalIds: [event.approvalId],
+          });
           await emit("approval.required", eventPayload);
           writeEvent(res, "approval_required", { type: "approval_required", ...eventPayload });
         } else if (event.type === "tool_result") {
           await store.finishToolExecution(`${run.id}:${event.id}`, { status: "completed", output: event.output });
+          await persistCheckpoint("tool_result_persisted", {
+            toolResults: { [event.id]: event.output },
+            context: { completedToolExecutionId: `${run.id}:${event.id}` },
+          });
           const toolIndex = toolIndexes.get(event.id);
           if (toolIndex !== undefined) {
             writeEvent(res, "content_block_stop", { type: "content_block_stop", index: toolIndex });
@@ -881,6 +924,7 @@ export const createGateway = async (config: GatewayConfig = {}) => {
         metadata: { provider: effectiveProvider, usage },
       });
       await store.updateRun(run.id, { status: "completed" });
+      await persistCheckpoint("completed");
       await emit("run.completed", { usage });
       res.end();
     } catch (error) {
