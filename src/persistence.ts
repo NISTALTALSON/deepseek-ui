@@ -216,6 +216,7 @@ export interface PersistenceAdapter {
   runs(owner?: string): Promise<RunRecord[]>;
   recoverInterruptedRuns(): Promise<RunRecord[]>;
   beginToolExecution(input: Omit<ToolExecutionRecord, "createdAt" | "updatedAt" | "status">): Promise<ToolExecutionRecord>;
+  getToolExecution(id: string): Promise<ToolExecutionRecord | undefined>;
   finishToolExecution(id: string, patch: Pick<ToolExecutionRecord, "status"> & Partial<Pick<ToolExecutionRecord, "output" | "error">>): Promise<ToolExecutionRecord | undefined>;
   createProject(input: Pick<ProjectRecord, "owner" | "name"> & Partial<ProjectRecord>): Promise<ProjectRecord>;
   listProjects(owner: string, includeArchived?: boolean): Promise<ProjectRecord[]>;
@@ -472,6 +473,11 @@ export class WorkspaceStore implements PersistenceAdapter {
       this.data.toolExecutions.push(record);
       return record;
     });
+  }
+
+  async getToolExecution(id: string): Promise<ToolExecutionRecord | undefined> {
+    await this.load();
+    return this.data.toolExecutions.find((item) => item.id === id);
   }
 
   async finishToolExecution(id: string, patch: Pick<ToolExecutionRecord, "status"> & Partial<Pick<ToolExecutionRecord, "output" | "error">>): Promise<ToolExecutionRecord | undefined> {

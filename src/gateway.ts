@@ -6,7 +6,7 @@ import { createProvider } from "./provider.js";
 import { McpHub, type McpConfig } from "./mcp.js";
 import { Permissions, defaultPolicy, type PolicyConfig } from "./permissions.js";
 import { SkillRegistry } from "./skills.js";
-import { WorkspaceStore, type AgentRecord, type ExecutionCheckpoint, type IntegrationRecord } from "./persistence.js";
+import { WorkspaceStore, type AgentRecord, type ExecutionCheckpoint, type IntegrationRecord, type RunRecord } from "./persistence.js";
 import { FileStorage, MAX_FILE_BYTES, processFile, validateUpload } from "./knowledge.js";
 import type { AssistantMessage, Message, ToolCall } from "./types.js";
 
@@ -194,6 +194,149 @@ export const createGateway = async (config: GatewayConfig = {}) => {
   await store.recoverInterruptedRuns();
   const activeRuns = new Map<string, AbortController>();
   const approvalResolvers = new Map<string, (approved: boolean) => void>();
+  const resumeWorkers = new Map<string, Promise<void>>();
+
+  const resumeRun = async (runId: string, owner: string): Promise<RunRecord | undefined> => {
+    const run = await store.getRun(runId);
+    if (!run || run.owner !== owner) return undefined;
+    if (["completed", "failed", "cancelled", "expired"].includes(run.status)) return run;
+    const lease = await store.acquireRunLease(runId, `gateway:${process.pid}`);
+    if (!lease) return await store.getRun(runId);
+    const existingWorker = resumeWorkers.get(runId);
+    if (existingWorker) return await store.getRun(runId);
+    const worker = (async () => {
+      try {
+        const checkpoint = await store.latestCheckpoint(runId, owner);
+        if (!checkpoint) {
+          await store.updateRun(runId, { status: "failed", error: "No recoverable execution checkpoint exists." });
+          return;
+        }
+        const pending = checkpoint.pendingToolCalls[0];
+        if (!pending) {
+          await store.updateRun(runId, { status: "paused", error: "Checkpoint has no resumable operation." });
+          return;
+        }
+        const approvalId = checkpoint.approvalIds[0];
+        const approval = approvalId ? await store.getApproval(approvalId, owner) : undefined;
+        if (!approval || approval.status === "pending") {
+          await store.updateRun(runId, { status: "awaiting_approval" });
+          return;
+        }
+        if (approval.status !== "approved") {
+          await store.updateRun(runId, { status: "failed", error: `Approval ${approval.status}.` });
+          return;
+        }
+        const config = checkpoint.agentConfig;
+        const controller = new AbortController();
+        activeRuns.set(runId, controller);
+        const projectId = typeof config.projectId === "string" ? config.projectId : undefined;
+        const agent = new Agent({
+          client: createProvider(checkpoint.providerId, {
+            apiKey: upstreamKey ?? "",
+            baseUrl: upstream,
+            model: checkpoint.modelId,
+            maxRetries: cfg.maxRetries,
+            mockDelayMs: cfg.mockDelayMs,
+          }),
+          mcp,
+          skills,
+          permissions,
+          systemPrompt: typeof config.systemPrompt === "string" ? config.systemPrompt : "You are a helpful assistant.",
+          initialMessages: checkpoint.messages,
+          enabledSkills: new Set(Array.isArray(config.skillNames) ? config.skillNames.filter((value): value is string => typeof value === "string") : []),
+          enabledMcpServers: new Set(Array.isArray(config.enabledMcpServers) ? config.enabledMcpServers.filter((value): value is string => typeof value === "string") : []),
+          allowedTools: new Set(Array.isArray(config.allowedTools) ? config.allowedTools.filter((value): value is string => typeof value === "string") : []),
+          projectInstructions: projectId ? (await store.getProject(projectId, owner))?.instructions : undefined,
+          knowledgeSearch: async (query) => {
+            const chunks = await store.searchKnowledge(owner, query, projectId, 8);
+            return chunks.length ? chunks.map((chunk) => `${chunk.metadata.filename ?? chunk.fileId}\n${chunk.content}`).join("\n\n") : "No relevant project knowledge was found.";
+          },
+          requestApproval: async ({ call, args, spec, permissionClass }) => {
+            const nextApprovalId = randomUUID();
+            const expiresAt = new Date(Date.now() + 15 * 60_000).toISOString();
+            const toolExecutionId = `${runId}:${call.id}`;
+            const operationHash = createHash("sha256").update(JSON.stringify({ name: call.function.name, args, schema: spec.schemaFingerprint ?? spec.parameters })).digest("hex");
+            await store.createApproval({
+              id: nextApprovalId,
+              owner,
+              workspaceId: owner,
+              conversationId: run.conversationId,
+              runId,
+              toolExecutionId,
+              toolId: call.function.name,
+              arguments: args,
+              operationSnapshot: { name: call.function.name, args, description: spec.description },
+              operationHash,
+              schemaFingerprint: spec.schemaFingerprint,
+              permissionClass,
+              policyResult: "approval_required",
+              expiresAt,
+            });
+            await store.updateRun(runId, { status: "awaiting_approval" });
+            let resolve!: (approved: boolean) => void;
+            const wait = new Promise<boolean>((done) => { resolve = done; });
+            approvalResolvers.set(nextApprovalId, resolve);
+            return { approvalId: nextApprovalId, expiresAt, wait };
+          },
+        });
+        const executionId = approval.toolExecutionId;
+        const journal = await store.getToolExecution(executionId);
+        let output = journal?.output;
+        if (journal?.status === "ambiguous") {
+          await store.updateRun(runId, { status: "paused", error: "External tool outcome requires reconciliation." });
+          return;
+        }
+        if (journal?.status !== "completed") {
+          await store.updateRun(runId, { status: "running" });
+          await store.appendEvent(runId, run.conversationId, "run.tool_ready", { id: pending.id, name: pending.function.name });
+          await store.updateApproval(approval.id, owner, { status: "executing", executionStatus: "started" });
+          output = await agent.executeApprovedCall(pending, controller.signal);
+          await store.finishToolExecution(executionId, { status: "completed", output });
+          await store.updateApproval(approval.id, owner, { status: "completed", executionStatus: "completed", result: output });
+        }
+        await store.createCheckpoint({
+          runId,
+          conversationId: run.conversationId,
+          owner,
+          phase: "tool_result_persisted",
+          agentConfig: checkpoint.agentConfig,
+          providerId: checkpoint.providerId,
+          modelId: checkpoint.modelId,
+          modelParameters: checkpoint.modelParameters,
+          messages: [...agent.messages, { role: "tool", tool_call_id: pending.id, content: output ?? "" }],
+          pendingToolCalls: [],
+          completedToolExecutionIds: [executionId],
+          toolResults: { [pending.id]: output ?? "" },
+          approvalIds: [approval.id],
+          context: {},
+        });
+        for await (const event of agent.resumeAfterTool(pending, output ?? "", controller.signal)) {
+          await store.appendEvent(runId, run.conversationId, `run.${event.type}`, event.type === "text" || event.type === "reasoning"
+            ? { delta: event.delta }
+            : event.type === "tool_result" ? { id: event.id, name: event.name, output: event.output }
+              : event.type === "tool_start" ? { id: event.id, name: event.name, args: event.args }
+                : event.type === "approval_required" ? { id: event.id, name: event.name, approvalId: event.approvalId, args: event.args, expiresAt: event.expiresAt }
+                  : event.type === "done" ? { usage: event.usage } : {});
+          if (event.type === "tool_result") {
+            const id = `${runId}:${event.id}`;
+            await store.beginToolExecution({ id, runId, toolName: event.name, argumentsHash: createHash("sha256").update(JSON.stringify(event.output)).digest("hex") });
+            await store.finishToolExecution(id, { status: "completed", output: event.output });
+          }
+        }
+        await store.updateRun(runId, { status: "completed" });
+        await store.appendEvent(runId, run.conversationId, "run.completed", {});
+      } catch (error) {
+        await store.updateRun(runId, { status: "failed", error: error instanceof Error ? error.message : String(error) });
+        await store.appendEvent(runId, run.conversationId, "run.failed", { error: error instanceof Error ? error.message : String(error) });
+      } finally {
+        activeRuns.delete(runId);
+        await store.releaseRunLease(runId, `gateway:${process.pid}`);
+      }
+    })();
+    resumeWorkers.set(runId, worker);
+    void worker.finally(() => resumeWorkers.delete(runId));
+    return await store.getRun(runId);
+  };
 
   const server = createServer(async (req, res) => {
     const origin = header(req.headers, "origin");
@@ -580,6 +723,50 @@ export const createGateway = async (config: GatewayConfig = {}) => {
       json(res, 200, { runs: await store.runs(owner) });
       return;
     }
+    const checkpointMatch = requestUrl.pathname.match(/^\/runs\/([^/]+)\/checkpoints?$/);
+    if (checkpointMatch && req.method === "GET") {
+      const run = await store.getRun(checkpointMatch[1]);
+      if (!run || run.owner !== owner) {
+        json(res, 404, { error: { message: "Run not found" } });
+        return;
+      }
+      const checkpoint = await store.latestCheckpoint(run.id, owner);
+      json(res, checkpoint ? 200 : 404, checkpoint ? { checkpoint } : { error: { message: "Checkpoint not found" } });
+      return;
+    }
+    const checkpointHistoryMatch = requestUrl.pathname.match(/^\/runs\/([^/]+)\/checkpoint-history$/);
+    if (checkpointHistoryMatch && req.method === "GET") {
+      const run = await store.getRun(checkpointHistoryMatch[1]);
+      if (!run || run.owner !== owner) {
+        json(res, 404, { error: { message: "Run not found" } });
+        return;
+      }
+      json(res, 200, { checkpoints: await store.checkpointHistory(run.id, owner) });
+      return;
+    }
+    const recoveryMatch = requestUrl.pathname.match(/^\/runs\/([^/]+)\/recovery$/);
+    if (recoveryMatch && req.method === "GET") {
+      const run = await store.getRun(recoveryMatch[1]);
+      if (!run || run.owner !== owner) {
+        json(res, 404, { error: { message: "Run not found" } });
+        return;
+      }
+      const checkpoint = await store.latestCheckpoint(run.id, owner);
+      const approval = checkpoint?.approvalIds[0] ? await store.getApproval(checkpoint.approvalIds[0], owner) : undefined;
+      json(res, 200, {
+        run,
+        checkpoint,
+        approval,
+        recoverable: Boolean(checkpoint && (checkpoint.phase === "awaiting_approval" || checkpoint.phase === "tool_result_persisted" || checkpoint.phase === "paused")),
+      });
+      return;
+    }
+    const resumeMatch = requestUrl.pathname.match(/^\/runs\/([^/]+)\/resume$/);
+    if (resumeMatch && req.method === "POST") {
+      const run = await resumeRun(resumeMatch[1], owner);
+      json(res, run ? 202 : 404, run ? { run } : { error: { message: "Run not found" } });
+      return;
+    }
     if (requestUrl.pathname === "/approvals" && req.method === "GET") {
       json(res, 200, { approvals: await store.listApprovals(owner) });
       return;
@@ -604,6 +791,9 @@ export const createGateway = async (config: GatewayConfig = {}) => {
           approvalResolvers.delete(approval.id);
           if (approval.status === "approved") await store.updateRun(approval.runId, { status: "running" });
           resolver(approval.status === "approved");
+        }
+        if (!resolver && approval.status === "approved") {
+          void resumeRun(approval.runId, owner);
         }
         const run = await store.getRun(approval.runId);
         if (run) await store.appendEvent(run.id, run.conversationId, `approval.${approval.status}`, { approval });
