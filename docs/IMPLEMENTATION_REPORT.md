@@ -162,18 +162,21 @@ scenarios, cost dashboards, OpenTelemetry export, and a production auth layer.
 ## Remaining limitations
 
 The JSON store is intentionally a reliable local foundation, not a substitute
-for a multi-user database. The gateway currently records execution lifecycle
-and replay but does not yet resume an interrupted model call from a checkpoint.
+for a multi-user database. The gateway now persists versioned execution
+checkpoints and can reconstruct a paused run from the latest integrity-checked
+boundary using a single-owner lease.
 Approvals now use owner-scoped durable records with immutable operation
 snapshots, schema fingerprints, operation hashes, expiry, and compare-and-set
 decisions. Active runs pause at `awaiting_approval` and resume the original
 tool call through the approval API. A gateway restart preserves pending
-approval history but intentionally does not resume a partially executed agent
-loop without a persisted checkpoint. Browser reopen now queries the durable run list for the loaded
+approval history; a valid checkpoint plus approval can reconstruct the run,
+while a run without a valid checkpoint remains paused. Browser reopen now queries the durable run list for the loaded
 conversation and converts paused, failed, or cancelled in-flight messages into
 explicit recoverable error/stopped states without retrying side effects. The
 activity panel currently reflects structured stream blocks rather than
-independently replaying run events after a full browser refresh. Plugin package
+independently replaying run events after a full browser refresh. Resume uses
+the persisted tool journal and will not rerun completed operations; interrupted
+or ambiguous external side effects remain blocked for reconciliation. Plugin package
 execution, MCP OAuth, connector secrets, large-scale object storage, OCR
 for scanned PDFs/images, vector embeddings, reranking, and richer page-level
 previews are still required for the full production vision. The UI deliberately

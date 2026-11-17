@@ -4,7 +4,8 @@ import { prepareMessages } from "../src/deepseek.js";
 import { Permissions } from "../src/permissions.js";
 import { SkillRegistry, parseFrontmatter } from "../src/skills.js";
 import { createGateway, getRequestApiKey, toAgentMessages } from "../src/gateway.js";
-import { compactMessages } from "../src/agent.js";
+import { Agent, compactMessages } from "../src/agent.js";
+import { McpHub } from "../src/mcp.js";
 import { MockProvider } from "../src/provider.js";
 import { WorkspaceStore } from "../src/persistence.js";
 import { chunkDocument, extractDocument, FileStorage, validateUpload } from "../src/knowledge.js";
@@ -480,4 +481,24 @@ test("agent context compaction keeps the system prompt and newest messages", () 
   assert.equal(compacted[0].role, "system");
   assert.equal(compacted.at(-1)?.content, "latest");
   assert.ok(compacted.some((message) => message.content?.toString().includes("compacted")));
+});
+
+test("agent reconstructs from checkpoint messages and continues after a committed tool result", async () => {
+  const toolCall = { id: "tool-1", type: "function" as const, function: { name: "external__write", arguments: "{\"value\":1}" } };
+  const agent = new Agent({
+    client: new MockProvider(),
+    mcp: new McpHub(),
+    skills: new SkillRegistry(),
+    permissions: new Permissions({ rules: [], default: "deny" }, async () => false),
+    initialMessages: [
+      { role: "system", content: "system" },
+      { role: "user", content: "do the work" },
+      { role: "assistant", content: null, tool_calls: [toolCall] },
+    ],
+  });
+  const events = [];
+  for await (const event of agent.resumeAfterTool(toolCall, "committed result")) events.push(event);
+  assert.equal(events.at(-1)?.type, "done");
+  assert.equal(agent.messages.filter((message) => message.role === "tool").length, 1);
+  assert.equal(agent.messages.filter((message) => message.role === "assistant").length, 2);
 });

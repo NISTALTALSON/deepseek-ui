@@ -66,10 +66,16 @@ the gateway is the security and execution boundary.
   resumes the original call after approval through `/approvals/:id`. A gateway
   restart preserves the approval record but intentionally leaves the run paused;
   it does not claim checkpoint-level continuation yet.
-- Gateway startup marks queued/running runs as `paused`, and never replays their
-  tool calls automatically. Pending approvals remain inspectable and cannot be
-  approved by another owner, but continuation after process restart still
-  requires a future persisted agent checkpoint.
+- Execution checkpoints now persist normalized agent messages, pending tool
+  calls, operation references, provider/model configuration, phase, sequence,
+  and an integrity hash. A run lease prevents two gateway workers from
+  resuming the same run. `/runs/:id/checkpoint`, `/checkpoint-history`,
+  `/recovery`, and `/resume` expose owner-scoped recovery controls.
+- Gateway startup marks queued/running runs as `paused`, and never replays
+  side effects automatically. A valid checkpoint plus an approved operation
+  can be reconstructed by the resume worker; completed journal entries are
+  reused. Running/ambiguous external operations remain paused and require
+  reconciliation rather than blind retry.
 - Run event replay is available through the SSE form of
   `GET /runs/:id/events` with `Last-Event-ID`; the UI client has a reusable
   `streamRunEvents` helper. On conversation load, the UI also queries
