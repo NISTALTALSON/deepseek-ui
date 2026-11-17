@@ -144,9 +144,29 @@ available only for local/mock resource tests and cannot authorize connector
 credentials. Google Drive and Notion are capability registrations only until
 their provider-specific OAuth and resource selection flows are configured.
 
+### Artifacts workspace
+
+**Implemented:** Persistent owner-scoped artifacts support markdown, code,
+HTML, Mermaid, JSON, structured data, and plain text. Each artifact has
+immutable append-only versions, conversation/project associations, atomic
+updates, restore-as-new-version, owner isolation, deletion, and download.
+The gateway validates JSON artifacts and exposes list/get/create/update/
+restore/delete/download routes.
+
+The agent runtime provides `artifact_create` and `artifact_update` tools.
+They use the existing permission and approval boundary and store a stable
+tool-call execution marker for safe recovery. The UI adds a responsive
+Artifacts panel with preview, edit/save, version history, restore, and
+download. HTML previews use a sandboxed iframe with restrictive CSP and no
+script permission.
+
+**Limitations:** Artifact creation is currently agent-driven or API-driven;
+there is no standalone “new artifact” button. Syntax rendering uses the
+existing markdown/code renderer, including Mermaid diagram rendering.
+
 ## Validation results
 
-- Root tests: **28 passed, 0 failed**
+- Root tests: **30 passed, 0 failed**
 - Root TypeScript type-check: **passed**
 - UI TypeScript type-check: **passed**
 - UI lint: **0 warnings, 0 errors**
@@ -166,6 +186,8 @@ their provider-specific OAuth and resource selection flows are configured.
 - Connector foundation: credential encryption/decryption, OAuth state
   ownership and replay protection, connector capability metadata, and tool
   permission classification are covered.
+- Artifact workspace: persistent versioning, restore, owner isolation, and
+  agent-created artifact updates are covered.
 
 ## Configuration and external dependencies
 

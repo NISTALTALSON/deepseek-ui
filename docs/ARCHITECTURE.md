@@ -112,6 +112,19 @@ the gateway is the security and execution boundary.
   as capability placeholders until provider OAuth endpoints and resource
   boundaries are configured; they are not reported as connected by metadata
   alone.
+- Artifact boundary: `ArtifactRecord` in `src/persistence.ts` stores
+  owner-scoped, conversation/project-associated content with append-only
+  versions. `POST/PATCH /artifacts` never overwrites an earlier version;
+  restore creates a new version, and download returns only the current
+  owner-authorized content. The agent exposes `artifact_create` and
+  `artifact_update` through the same approval, journal, checkpoint, and
+  recovery path as other side-effecting tools. Artifact creation carries a
+  stable tool-call execution marker so recovery can reuse a completed local
+  mutation instead of duplicating it.
+- Artifact preview boundary: the UI artifact panel renders markdown and
+  source content locally, while HTML is placed in an iframe with an empty
+  sandbox and restrictive CSP. Generated HTML/JavaScript is never executed in
+  the trusted application origin.
 - Managed package boundary: user-uploaded `SKILL.md` packages are stored under
   the configured skill root and can be inspected, edited, enabled, and removed
   through the gateway. Skill content is treated as untrusted instructions;

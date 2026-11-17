@@ -62,6 +62,13 @@ export const ArtifactPanel = ({ conversationId, onClose }: { conversationId: str
     if (selected.kind === 'markdown') {
       return <Markdown content={version.content} loading={false} cacheKey={`${selected.id}-${version.version}`} disableLink />
     }
+    if (selected.kind === 'mermaid') {
+      return <Markdown content={`~~~mermaid\n${version.content}\n~~~`} loading={false} cacheKey={`${selected.id}-${version.version}`} disableLink />
+    }
+    if (selected.kind === 'code' || selected.kind === 'json' || selected.kind === 'data') {
+      const language = selected.language ?? (selected.kind === 'json' ? 'json' : '')
+      return <Markdown content={`~~~${language}\n${version.content}\n~~~`} loading={false} cacheKey={`${selected.id}-${version.version}`} disableLink />
+    }
     return <pre className={styles.code}><code>{version.content}</code></pre>
   }, [selected, version])
 
