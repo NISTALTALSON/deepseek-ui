@@ -7,6 +7,7 @@ import { createGateway, getRequestApiKey, toAgentMessages } from "../src/gateway
 import { compactMessages } from "../src/agent.js";
 import { MockProvider } from "../src/provider.js";
 import { WorkspaceStore } from "../src/persistence.js";
+import { chunkDocument, extractDocument, FileStorage, validateUpload } from "../src/knowledge.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -105,6 +106,26 @@ test("workspace conversation listing isolates owners", async () => {
   await store.conversation({ id: "owner-a", owner: "a", title: "A" });
   await store.conversation({ id: "owner-b", owner: "b", title: "B" });
   assert.deepEqual((await store.listConversations("a")).map((conversation) => conversation.id), ["owner-a"]);
+});
+
+test("projects, files, extraction, and keyword knowledge stay owner and project scoped", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "deepseek-ui-projects-"));
+  const store = new WorkspaceStore(join(directory, "workspace.json"));
+  const project = await store.createProject({ owner: "alice", name: "Policies", instructions: "Use policy documents." });
+  const storage = new FileStorage(join(directory, "files"));
+  const info = validateUpload("policy.md", 42);
+  const fileId = "file-policy";
+  const storageKey = await storage.put(fileId, Buffer.from("# Retention\nKeep records for seven years."));
+  const file = await store.createFile({
+    id: fileId, owner: "alice", projectId: project.id, originalName: "policy.md", mimeType: info.mimeType,
+    size: 42, storageKey, extractionStatus: "queued", metadata: {},
+  });
+  const extracted = await extractDocument(await storage.read(storageKey), file.originalName);
+  await store.updateFile(file.id, "alice", { extractionStatus: "completed", extractedText: extracted.text });
+  await store.replaceKnowledgeChunks(file.id, "alice", chunkDocument(file, extracted, 200, 20));
+  assert.equal((await store.searchKnowledge("alice", "seven years", project.id)).length, 1);
+  assert.equal((await store.searchKnowledge("bob", "seven years", project.id)).length, 0);
+  assert.throws(() => validateUpload("../secret.txt", 5));
 });
 
 test("gateway cancellation aborts active mock generation and is idempotent", async () => {

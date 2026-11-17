@@ -7,6 +7,7 @@ import { McpHub, type McpConfig } from "./mcp.js";
 import { Permissions, defaultPolicy, type PolicyConfig } from "./permissions.js";
 import { SkillRegistry } from "./skills.js";
 import { WorkspaceStore } from "./persistence.js";
+import { FileStorage, MAX_FILE_BYTES, processFile, validateUpload } from "./knowledge.js";
 import type { AssistantMessage, Message } from "./types.js";
 
 export type GatewayConfig = {
@@ -23,6 +24,7 @@ export type GatewayConfig = {
   allowedOrigins?: string[];
   maxRequestBytes?: number;
   dataFile?: string;
+  filesRoot?: string;
 };
 
 export type GatewayCapabilities = {
@@ -173,6 +175,7 @@ export const createGateway = async (config: GatewayConfig = {}) => {
     async () => false
   );
   const store = new WorkspaceStore(cfg.dataFile);
+  const fileStorage = new FileStorage(cfg.filesRoot);
   await store.load();
   await store.recoverInterruptedRuns();
   const activeRuns = new Map<string, AbortController>();
@@ -186,7 +189,7 @@ export const createGateway = async (config: GatewayConfig = {}) => {
     }
     res.setHeader(
       "access-control-allow-headers",
-      "content-type, authorization, x-api-key, anthropic-beta, x-deepseek-ui-skills, x-deepseek-ui-integrations, x-deepseek-ui-provider, x-deepseek-ui-workspace",
+      "content-type, authorization, x-api-key, anthropic-beta, x-deepseek-ui-skills, x-deepseek-ui-integrations, x-deepseek-ui-provider, x-deepseek-ui-workspace, x-deepseek-ui-project, x-project-id, x-conversation-id, x-file-name",
     );
     res.setHeader("access-control-allow-methods", "GET, POST, DELETE, OPTIONS");
     if (req.method === "OPTIONS") {
@@ -225,6 +228,131 @@ export const createGateway = async (config: GatewayConfig = {}) => {
     }
 
     const requestUrl = new URL(req.url ?? "/", "http://localhost");
+    if (requestUrl.pathname === "/projects" && req.method === "GET") {
+      json(res, 200, { projects: await store.listProjects(owner, requestUrl.searchParams.get("includeArchived") === "true") });
+      return;
+    }
+    if (requestUrl.pathname === "/projects" && req.method === "POST") {
+      try {
+        const body = JSON.parse((await readLimitedBody(req, cfg.maxRequestBytes ?? 2_000_000)).toString("utf8")) as Record<string, unknown>;
+        if (typeof body.name !== "string" || !body.name.trim()) throw new Error("Project name is required");
+        json(res, 201, { project: await store.createProject({
+          owner, name: body.name.trim(), description: typeof body.description === "string" ? body.description : "",
+          instructions: typeof body.instructions === "string" ? body.instructions : "",
+          preferredModel: typeof body.preferredModel === "string" ? body.preferredModel : undefined,
+          preferredAgent: typeof body.preferredAgent === "string" ? body.preferredAgent : undefined,
+          memoryEnabled: body.memoryEnabled !== false, config: typeof body.config === "object" && body.config ? body.config as Record<string, unknown> : {},
+        }) });
+      } catch (error) {
+        json(res, 400, { error: { message: error instanceof Error ? error.message : String(error) } });
+      }
+      return;
+    }
+    const projectMatch = requestUrl.pathname.match(/^\/projects\/([^/]+)$/);
+    if (projectMatch && req.method === "GET") {
+      const project = await store.getProject(projectMatch[1], owner);
+      json(res, project ? 200 : 404, project ? { project } : { error: { message: "Project not found" } });
+      return;
+    }
+    if (projectMatch && req.method === "PATCH") {
+      try {
+        const patch = JSON.parse((await readLimitedBody(req, cfg.maxRequestBytes ?? 2_000_000)).toString("utf8")) as Record<string, unknown>;
+        const project = await store.updateProject(projectMatch[1], owner, {
+          ...(typeof patch.name === "string" ? { name: patch.name.trim() } : {}),
+          ...(typeof patch.description === "string" ? { description: patch.description } : {}),
+          ...(typeof patch.instructions === "string" ? { instructions: patch.instructions } : {}),
+          ...(typeof patch.preferredModel === "string" ? { preferredModel: patch.preferredModel } : {}),
+          ...(typeof patch.preferredAgent === "string" ? { preferredAgent: patch.preferredAgent } : {}),
+          ...(typeof patch.archived === "boolean" ? { archived: patch.archived } : {}),
+        });
+        json(res, project ? 200 : 404, project ? { project } : { error: { message: "Project not found" } });
+      } catch (error) {
+        json(res, 400, { error: { message: error instanceof Error ? error.message : String(error) } });
+      }
+      return;
+    }
+    if (projectMatch && req.method === "DELETE") {
+      const deleted = await store.deleteProject(projectMatch[1], owner);
+      json(res, deleted ? 200 : 404, deleted ? { ok: true } : { error: { message: "Project not found" } });
+      return;
+    }
+    const projectFilesMatch = requestUrl.pathname.match(/^\/projects\/([^/]+)\/files$/);
+    if (projectFilesMatch && req.method === "GET") {
+      if (!await store.getProject(projectFilesMatch[1], owner)) {
+        json(res, 404, { error: { message: "Project not found" } });
+        return;
+      }
+      json(res, 200, { files: await store.listFiles(owner, projectFilesMatch[1]) });
+      return;
+    }
+    if (requestUrl.pathname === "/files" && req.method === "GET") {
+      json(res, 200, { files: await store.listFiles(owner, requestUrl.searchParams.get("projectId") ?? undefined, requestUrl.searchParams.get("conversationId") ?? undefined) });
+      return;
+    }
+    if (requestUrl.pathname === "/files" && req.method === "POST") {
+      try {
+        const name = header(req.headers, "x-file-name") ?? "";
+        const projectId = header(req.headers, "x-project-id") ?? undefined;
+        const conversationId = header(req.headers, "x-conversation-id") ?? undefined;
+        const body = await readLimitedBody(req, cfg.maxRequestBytes ?? MAX_FILE_BYTES);
+        const info = validateUpload(name, body.byteLength);
+        if (projectId && !await store.getProject(projectId, owner)) throw new Error("Project not found");
+        const id = randomUUID();
+        const storageKey = await fileStorage.put(id, body);
+        const file = await store.createFile({
+          id, owner, projectId, conversationId, originalName: name, mimeType: header(req.headers, "content-type") ?? info.mimeType,
+          size: body.byteLength, storageKey, extractionStatus: "queued", metadata: { extension: info.extension },
+        });
+        void processFile(store, fileStorage, file);
+        json(res, 201, { file });
+      } catch (error) {
+        json(res, 400, { error: { message: error instanceof Error ? error.message : String(error) } });
+      }
+      return;
+    }
+    const fileMatch = requestUrl.pathname.match(/^\/files\/([^/]+)$/);
+    if (fileMatch && req.method === "GET") {
+      const file = await store.getFile(fileMatch[1], owner);
+      json(res, file ? 200 : 404, file ? { file } : { error: { message: "File not found" } });
+      return;
+    }
+    const fileContentMatch = requestUrl.pathname.match(/^\/files\/([^/]+)\/content$/);
+    if (fileContentMatch && req.method === "GET") {
+      const file = await store.getFile(fileContentMatch[1], owner);
+      if (!file) {
+        json(res, 404, { error: { message: "File not found" } });
+        return;
+      }
+      const content = await fileStorage.read(file.storageKey);
+      res.writeHead(200, { "content-type": file.mimeType, "content-length": content.byteLength, "content-disposition": `inline; filename="${file.originalName.replace(/["\r\n]/g, "")}"` });
+      res.end(content);
+      return;
+    }
+    if (fileMatch && req.method === "DELETE") {
+      const file = await store.getFile(fileMatch[1], owner);
+      if (!file) {
+        json(res, 404, { error: { message: "File not found" } });
+        return;
+      }
+      await fileStorage.remove(file.storageKey);
+      await store.deleteFile(file.id, owner);
+      json(res, 200, { ok: true });
+      return;
+    }
+    if (requestUrl.pathname === "/knowledge/search" && req.method === "POST") {
+      try {
+        const body = JSON.parse((await readLimitedBody(req, cfg.maxRequestBytes ?? 2_000_000)).toString("utf8")) as { query?: string; projectId?: string; limit?: number };
+        if (!body.query?.trim()) throw new Error("query is required");
+        const chunks = await store.searchKnowledge(owner, body.query, body.projectId, Math.min(20, Math.max(1, body.limit ?? 8)));
+        json(res, 200, { results: chunks.map((chunk) => ({
+          id: chunk.id, content: chunk.content, page: chunk.page, section: chunk.section, fileId: chunk.fileId,
+          source: `Source: ${chunk.metadata.filename ?? chunk.fileId}${chunk.page ? ` (page ${chunk.page})` : ""}`,
+        })) });
+      } catch (error) {
+        json(res, 400, { error: { message: error instanceof Error ? error.message : String(error) } });
+      }
+      return;
+    }
     const runEventsMatch = requestUrl.pathname.match(/^\/runs\/([^/]+)\/events$/);
     if (runEventsMatch && req.method === "GET") {
       const run = await store.getRun(runEventsMatch[1]);
@@ -327,6 +455,15 @@ export const createGateway = async (config: GatewayConfig = {}) => {
       enabledSkills: csvHeader(req.headers, "x-deepseek-ui-skills"),
       enabledMcpServers: csvHeader(req.headers, "x-deepseek-ui-integrations"),
       maxContextChars: 120_000,
+      projectInstructions: (await store.getProject(header(req.headers, "x-deepseek-ui-project") ?? "", owner))?.instructions,
+      knowledgeSearch: async (query) => {
+        const projectId = header(req.headers, "x-deepseek-ui-project") ?? undefined;
+        const chunks = await store.searchKnowledge(owner, query, projectId, 8);
+        if (!chunks.length) return "No relevant project knowledge was found.";
+        return chunks.map((chunk) =>
+          `[${chunk.metadata.filename ?? chunk.fileId}${chunk.page ? `, page ${chunk.page}` : ""}]\n${chunk.content}`,
+        ).join("\n\n");
+      },
     });
     const conversationId = header(req.headers, "x-deepseek-ui-conversation") ?? randomUUID();
     await store.conversation({
@@ -334,6 +471,9 @@ export const createGateway = async (config: GatewayConfig = {}) => {
       owner,
       provider,
       model: input.model ?? cfg.model ?? "deepseek-flash",
+      metadata: {
+        projectId: header(req.headers, "x-deepseek-ui-project") ?? undefined,
+      },
     });
     const run = await store.createRun({
       owner,

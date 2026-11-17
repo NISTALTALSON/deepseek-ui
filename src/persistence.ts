@@ -54,6 +54,50 @@ export type ToolExecutionRecord = {
   error?: string;
 };
 
+export type ProjectRecord = {
+  id: string;
+  owner: string;
+  name: string;
+  description: string;
+  instructions: string;
+  preferredModel?: string;
+  preferredAgent?: string;
+  memoryEnabled: boolean;
+  archived: boolean;
+  createdAt: string;
+  updatedAt: string;
+  config: Record<string, unknown>;
+};
+
+export type FileRecord = {
+  id: string;
+  owner: string;
+  projectId?: string;
+  conversationId?: string;
+  originalName: string;
+  mimeType: string;
+  size: number;
+  storageKey: string;
+  uploadedAt: string;
+  extractionStatus: "uploaded" | "queued" | "processing" | "completed" | "failed";
+  extractionError?: string;
+  extractedText?: string;
+  metadata: Record<string, unknown>;
+};
+
+export type KnowledgeChunkRecord = {
+  id: string;
+  owner: string;
+  projectId?: string;
+  fileId: string;
+  chunkIndex: number;
+  content: string;
+  page?: number;
+  section?: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+};
+
 export interface PersistenceAdapter {
   load(): Promise<void>;
   conversation(input?: Partial<ConversationRecord>): Promise<ConversationRecord>;
@@ -68,6 +112,19 @@ export interface PersistenceAdapter {
   recoverInterruptedRuns(): Promise<RunRecord[]>;
   beginToolExecution(input: Omit<ToolExecutionRecord, "createdAt" | "updatedAt" | "status">): Promise<ToolExecutionRecord>;
   finishToolExecution(id: string, patch: Pick<ToolExecutionRecord, "status"> & Partial<Pick<ToolExecutionRecord, "output" | "error">>): Promise<ToolExecutionRecord | undefined>;
+  createProject(input: Pick<ProjectRecord, "owner" | "name"> & Partial<ProjectRecord>): Promise<ProjectRecord>;
+  listProjects(owner: string, includeArchived?: boolean): Promise<ProjectRecord[]>;
+  getProject(id: string, owner: string): Promise<ProjectRecord | undefined>;
+  updateProject(id: string, owner: string, patch: Partial<ProjectRecord>): Promise<ProjectRecord | undefined>;
+  deleteProject(id: string, owner: string): Promise<boolean>;
+  attachConversationToProject(conversationId: string, projectId: string | undefined, owner: string): Promise<ConversationRecord | undefined>;
+  createFile(input: Omit<FileRecord, "uploadedAt"> & Partial<Pick<FileRecord, "uploadedAt">>): Promise<FileRecord>;
+  listFiles(owner: string, projectId?: string, conversationId?: string): Promise<FileRecord[]>;
+  getFile(id: string, owner: string): Promise<FileRecord | undefined>;
+  updateFile(id: string, owner: string, patch: Partial<FileRecord>): Promise<FileRecord | undefined>;
+  deleteFile(id: string, owner: string): Promise<boolean>;
+  replaceKnowledgeChunks(fileId: string, owner: string, chunks: Omit<KnowledgeChunkRecord, "createdAt">[]): Promise<KnowledgeChunkRecord[]>;
+  searchKnowledge(owner: string, query: string, projectId?: string, limit?: number): Promise<KnowledgeChunkRecord[]>;
 }
 
 type StoreData = {
@@ -77,14 +134,16 @@ type StoreData = {
   events: WorkspaceEvent[];
   toolExecutions: ToolExecutionRecord[];
   approvals: Array<Record<string, unknown>>;
-  projects: Array<Record<string, unknown>>;
+  projects: ProjectRecord[];
   memories: Array<Record<string, unknown>>;
   artifacts: Array<Record<string, unknown>>;
+  files: FileRecord[];
+  knowledgeChunks: KnowledgeChunkRecord[];
 };
 
 const emptyData = (): StoreData => ({
   conversations: [], messages: [], runs: [], events: [], toolExecutions: [],
-  approvals: [], projects: [], memories: [], artifacts: [],
+  approvals: [], projects: [], memories: [], artifacts: [], files: [], knowledgeChunks: [],
 });
 
 const locks = new Map<string, Promise<void>>();
@@ -249,5 +308,139 @@ export class WorkspaceStore implements PersistenceAdapter {
       Object.assign(item, patch, { updatedAt: new Date().toISOString() });
       return item;
     });
+  }
+
+  async createProject(input: Pick<ProjectRecord, "owner" | "name"> & Partial<ProjectRecord>): Promise<ProjectRecord> {
+    return this.mutate(() => {
+      const now = new Date().toISOString();
+      const project: ProjectRecord = {
+        id: input.id ?? randomUUID(),
+        owner: input.owner,
+        name: input.name,
+        description: input.description ?? "",
+        instructions: input.instructions ?? "",
+        preferredModel: input.preferredModel,
+        preferredAgent: input.preferredAgent,
+        memoryEnabled: input.memoryEnabled ?? true,
+        archived: input.archived ?? false,
+        createdAt: input.createdAt ?? now,
+        updatedAt: now,
+        config: input.config ?? {},
+      };
+      this.data.projects.push(project);
+      return project;
+    });
+  }
+
+  async listProjects(owner: string, includeArchived = false): Promise<ProjectRecord[]> {
+    await this.load();
+    return this.data.projects
+      .filter((project) => project.owner === owner && (includeArchived || !project.archived))
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  async getProject(id: string, owner: string): Promise<ProjectRecord | undefined> {
+    await this.load();
+    return this.data.projects.find((project) => project.id === id && project.owner === owner);
+  }
+
+  async updateProject(id: string, owner: string, patch: Partial<ProjectRecord>): Promise<ProjectRecord | undefined> {
+    return this.mutate(() => {
+      const project = this.data.projects.find((item) => item.id === id && item.owner === owner);
+      if (!project) return undefined;
+      Object.assign(project, patch, { id: project.id, owner: project.owner, updatedAt: new Date().toISOString() });
+      return project;
+    });
+  }
+
+  async deleteProject(id: string, owner: string): Promise<boolean> {
+    return this.mutate(() => {
+      const index = this.data.projects.findIndex((project) => project.id === id && project.owner === owner);
+      if (index < 0) return false;
+      this.data.projects.splice(index, 1);
+      for (const conversation of this.data.conversations) {
+        if (conversation.owner === owner && conversation.metadata.projectId === id) {
+          delete conversation.metadata.projectId;
+        }
+      }
+      return true;
+    });
+  }
+
+  async attachConversationToProject(conversationId: string, projectId: string | undefined, owner: string): Promise<ConversationRecord | undefined> {
+    return this.mutate(() => {
+      const conversation = this.data.conversations.find((item) => item.id === conversationId && item.owner === owner);
+      if (!conversation) return undefined;
+      if (projectId && !this.data.projects.some((project) => project.id === projectId && project.owner === owner)) return undefined;
+      conversation.metadata = { ...conversation.metadata, ...(projectId ? { projectId } : {}) };
+      if (!projectId) delete conversation.metadata.projectId;
+      conversation.updatedAt = new Date().toISOString();
+      return conversation;
+    });
+  }
+
+  async createFile(input: Omit<FileRecord, "uploadedAt"> & Partial<Pick<FileRecord, "uploadedAt">>): Promise<FileRecord> {
+    return this.mutate(() => {
+      const file: FileRecord = { ...input, uploadedAt: input.uploadedAt ?? new Date().toISOString() };
+      this.data.files.push(file);
+      return file;
+    });
+  }
+
+  async listFiles(owner: string, projectId?: string, conversationId?: string): Promise<FileRecord[]> {
+    await this.load();
+    return this.data.files.filter((file) =>
+      file.owner === owner &&
+      (projectId === undefined || file.projectId === projectId) &&
+      (conversationId === undefined || file.conversationId === conversationId),
+    );
+  }
+
+  async getFile(id: string, owner: string): Promise<FileRecord | undefined> {
+    await this.load();
+    return this.data.files.find((file) => file.id === id && file.owner === owner);
+  }
+
+  async updateFile(id: string, owner: string, patch: Partial<FileRecord>): Promise<FileRecord | undefined> {
+    return this.mutate(() => {
+      const file = this.data.files.find((item) => item.id === id && item.owner === owner);
+      if (!file) return undefined;
+      Object.assign(file, patch, { id: file.id, owner: file.owner });
+      return file;
+    });
+  }
+
+  async deleteFile(id: string, owner: string): Promise<boolean> {
+    return this.mutate(() => {
+      const index = this.data.files.findIndex((file) => file.id === id && file.owner === owner);
+      if (index < 0) return false;
+      this.data.files.splice(index, 1);
+      this.data.knowledgeChunks = this.data.knowledgeChunks.filter((chunk) => chunk.fileId !== id || chunk.owner !== owner);
+      return true;
+    });
+  }
+
+  async replaceKnowledgeChunks(fileId: string, owner: string, chunks: Omit<KnowledgeChunkRecord, "createdAt">[]): Promise<KnowledgeChunkRecord[]> {
+    return this.mutate(() => {
+      this.data.knowledgeChunks = this.data.knowledgeChunks.filter((chunk) => !(chunk.fileId === fileId && chunk.owner === owner));
+      const created = chunks.map((chunk) => ({ ...chunk, createdAt: new Date().toISOString() }));
+      this.data.knowledgeChunks.push(...created);
+      return created;
+    });
+  }
+
+  async searchKnowledge(owner: string, query: string, projectId?: string, limit = 8): Promise<KnowledgeChunkRecord[]> {
+    await this.load();
+    const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+    return this.data.knowledgeChunks
+      .filter((chunk) => chunk.owner === owner && (projectId === undefined || chunk.projectId === projectId))
+      .map((chunk) => ({
+        chunk,
+        score: terms.reduce((score, term) => score + (chunk.content.toLowerCase().includes(term) ? 1 : 0), 0),
+      }))
+      .filter((item) => item.score > 0)
+      .sort((a, b) => b.score - a.score || a.chunk.chunkIndex - b.chunk.chunkIndex)
+      .slice(0, limit)
+      .map((item) => item.chunk);
   }
 }
