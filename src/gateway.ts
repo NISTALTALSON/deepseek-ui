@@ -187,6 +187,7 @@ export const createGateway = async (config: GatewayConfig = {}) => {
   await store.load();
   await store.recoverInterruptedRuns();
   const activeRuns = new Map<string, AbortController>();
+  const approvalResolvers = new Map<string, (approved: boolean) => void>();
 
   const server = createServer(async (req, res) => {
     const origin = header(req.headers, "origin");
@@ -573,6 +574,39 @@ export const createGateway = async (config: GatewayConfig = {}) => {
       json(res, 200, { runs: await store.runs(owner) });
       return;
     }
+    if (requestUrl.pathname === "/approvals" && req.method === "GET") {
+      json(res, 200, { approvals: await store.listApprovals(owner) });
+      return;
+    }
+    const approvalMatch = requestUrl.pathname.match(/^\/approvals\/([^/]+)$/);
+    if (approvalMatch && req.method === "GET") {
+      const approval = await store.getApproval(approvalMatch[1], owner);
+      json(res, approval ? 200 : 404, approval ? { approval } : { error: { message: "Approval not found" } });
+      return;
+    }
+    if (approvalMatch && req.method === "POST") {
+      try {
+        const body = JSON.parse((await readLimitedBody(req, 100_000)).toString("utf8")) as { decision?: string; actor?: string };
+        if (body.decision !== "approved" && body.decision !== "denied") throw new Error("decision must be approved or denied");
+        const approval = await store.decideApproval(approvalMatch[1], owner, body.decision, body.actor ?? owner);
+        if (!approval) {
+          json(res, 404, { error: { message: "Approval not found" } });
+          return;
+        }
+        const resolver = approvalResolvers.get(approval.id);
+        if (resolver && (approval.status === "approved" || approval.status === "denied" || approval.status === "expired")) {
+          approvalResolvers.delete(approval.id);
+          if (approval.status === "approved") await store.updateRun(approval.runId, { status: "running" });
+          resolver(approval.status === "approved");
+        }
+        const run = await store.getRun(approval.runId);
+        if (run) await store.appendEvent(run.id, run.conversationId, `approval.${approval.status}`, { approval });
+        json(res, 200, { approval });
+      } catch (error) {
+        json(res, 400, { error: { message: error instanceof Error ? error.message : String(error) } });
+      }
+      return;
+    }
     if (requestUrl.pathname === "/conversations" && req.method === "GET") {
       json(res, 200, { conversations: await store.listConversations(owner) });
       return;
@@ -647,6 +681,24 @@ export const createGateway = async (config: GatewayConfig = {}) => {
     res.on("close", () => {
       if (!res.writableEnded) controller.abort();
     });
+    const conversationId = header(req.headers, "x-deepseek-ui-conversation") ?? randomUUID();
+    await store.conversation({
+      id: conversationId,
+      owner,
+      provider: effectiveProvider,
+      model: effectiveModel,
+      metadata: {
+        projectId: header(req.headers, "x-deepseek-ui-project") ?? undefined,
+        agentId: selectedAgent?.id,
+      },
+    });
+    const run = await store.createRun({
+      owner,
+      conversationId,
+      provider: effectiveProvider,
+      model: effectiveModel,
+    });
+    activeRuns.set(run.id, controller);
     const agent = new Agent({
       client: createProvider(effectiveProvider, {
         apiKey: apiKey ?? "",
@@ -677,25 +729,43 @@ export const createGateway = async (config: GatewayConfig = {}) => {
         ).join("\n\n");
       },
       allowedTools: selectedAgent ? new Set(selectedAgent.allowedTools) : undefined,
-    });
-    const conversationId = header(req.headers, "x-deepseek-ui-conversation") ?? randomUUID();
-    await store.conversation({
-      id: conversationId,
-      owner,
-      provider: effectiveProvider,
-      model: effectiveModel,
-      metadata: {
-        projectId: header(req.headers, "x-deepseek-ui-project") ?? undefined,
-        agentId: selectedAgent?.id,
+      requestApproval: async ({ call, args, spec, permissionClass }) => {
+        const approvalId = randomUUID();
+        const expiresAt = new Date(Date.now() + 15 * 60_000).toISOString();
+        const toolExecutionId = `${run.id}:${call.id}`;
+        const operationHash = createHash("sha256").update(JSON.stringify({ name: call.function.name, args, schema: spec.schemaFingerprint ?? spec.parameters })).digest("hex");
+        await store.createApproval({
+          id: approvalId,
+          owner,
+          workspaceId: owner,
+          conversationId,
+          runId: run.id,
+          toolExecutionId,
+          toolId: call.function.name,
+          arguments: args,
+          operationSnapshot: { name: call.function.name, args, description: spec.description },
+          operationHash,
+          schemaFingerprint: spec.schemaFingerprint,
+          permissionClass,
+          policyResult: "approval_required",
+          expiresAt,
+        });
+        let resolve!: (approved: boolean) => void;
+        const wait = new Promise<boolean>((done) => { resolve = done; });
+        approvalResolvers.set(approvalId, resolve);
+        setTimeout(async () => {
+          const current = await store.getApproval(approvalId, owner);
+          if (current?.status === "pending") {
+            const expired = await store.decideApproval(approvalId, owner, "denied", "system:expiry");
+            if (expired) {
+              approvalResolvers.delete(approvalId);
+              resolve(false);
+            }
+          }
+        }, 15 * 60_000).unref();
+        return { approvalId, expiresAt, wait };
       },
     });
-    const run = await store.createRun({
-      owner,
-      conversationId,
-      provider: effectiveProvider,
-      model: effectiveModel,
-    });
-    activeRuns.set(run.id, controller);
     const emit = async (type: string, payload: Record<string, unknown>) => {
       await store.appendEvent(run.id, conversationId, type, payload);
     };
@@ -747,7 +817,9 @@ export const createGateway = async (config: GatewayConfig = {}) => {
                 ? { id: event.id, name: event.name, output: event.output }
                 : event.type === "tool_denied"
                   ? { id: event.id, name: event.name }
-                  : { usage: event.usage };
+                    : event.type === "approval_required"
+                      ? { id: event.id, name: event.name, approvalId: event.approvalId, args: event.args, permissionClass: event.permissionClass, expiresAt: event.expiresAt }
+                    : { usage: event.usage };
         await emit(`run.${event.type}`, eventPayload);
         if (event.type === "reasoning") {
           writeEvent(res, "content_block_delta", { type: "content_block_delta", index: ensureBlock("thinking"), delta: { type: "thinking_delta", thinking: event.delta } });
@@ -767,6 +839,10 @@ export const createGateway = async (config: GatewayConfig = {}) => {
             index: toolIndex,
             content_block: { type: "tool_use", id: event.id, name: event.name, input: event.args },
           });
+        } else if (event.type === "approval_required") {
+          await store.updateRun(run.id, { status: "awaiting_approval" });
+          await emit("approval.required", eventPayload);
+          writeEvent(res, "approval_required", { type: "approval_required", ...eventPayload });
         } else if (event.type === "tool_result") {
           await store.finishToolExecution(`${run.id}:${event.id}`, { status: "completed", output: event.output });
           const toolIndex = toolIndexes.get(event.id);

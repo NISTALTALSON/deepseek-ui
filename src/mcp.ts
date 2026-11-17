@@ -3,6 +3,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { createHash } from "node:crypto";
 import { promises as dns } from "node:dns";
+import { isIP } from "node:net";
 import type { ToolSpec } from "./types.js";
 
 // MCP client. Plug in any existing MCP server (Desktop Commander, filesystem,
@@ -25,12 +26,21 @@ export interface McpConfig {
 }
 
 const isPrivateAddress = (address: string): boolean => {
-  const normalized = address.toLowerCase();
-  if (normalized === "::1" || normalized.startsWith("fc") || normalized.startsWith("fd") || normalized.startsWith("fe80:")) return true;
+  const normalized = address.toLowerCase().replace(/^\[|\]$/g, "");
+  const mapped = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
+  if (mapped) return isPrivateAddress(mapped[1]);
+  if (isIP(normalized) === 6) {
+    const first = Number.parseInt(normalized.split(":")[0] || "0", 16);
+    return normalized === "::" || normalized === "::1" || normalized.startsWith("fc") || normalized.startsWith("fd") ||
+      normalized.startsWith("fe8") || normalized.startsWith("fe9") || normalized.startsWith("fea") || normalized.startsWith("feb") ||
+      first >= 0xff00 || normalized.startsWith("2001:db8");
+  }
   const parts = normalized.split(".").map(Number);
-  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part))) return false;
-  return parts[0] === 10 || parts[0] === 127 || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) ||
-    (parts[0] === 192 && parts[1] === 168) || (parts[0] === 169 && parts[1] === 254);
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return true;
+  const [a, b] = parts;
+  return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) ||
+    (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && (b === 0 || b === 168)) || (a === 198 && (b === 18 || b === 19)) || a >= 224;
 };
 
 const validateRemoteUrl = async (value: string): Promise<URL> => {

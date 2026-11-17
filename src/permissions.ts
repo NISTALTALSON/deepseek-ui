@@ -2,10 +2,12 @@
 // First matching rule wins; anything unmatched falls back to `default`.
 
 export type Decision = "allow" | "ask" | "deny";
+export type PermissionClass = "read-only" | "reversible" | "external-side-effect" | "sensitive" | "destructive";
 
 export interface Rule {
   tool: string; // glob: "*" matches anything, "fs__*" matches a prefix
   decision: Decision;
+  permissionClass?: PermissionClass;
 }
 
 export interface PolicyConfig {

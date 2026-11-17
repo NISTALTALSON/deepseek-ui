@@ -29,6 +29,7 @@ export interface ToolSpec {
   parameters: Record<string, unknown>; // JSON Schema
   schemaFingerprint?: string;
   availability?: "available" | "unavailable";
+  permissionClass?: "read-only" | "reversible" | "external-side-effect" | "sensitive" | "destructive";
   readOnly?: boolean;
   timeoutMs?: number;
   retries?: number;

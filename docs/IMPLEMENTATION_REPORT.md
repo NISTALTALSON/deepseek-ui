@@ -164,8 +164,12 @@ scenarios, cost dashboards, OpenTelemetry export, and a production auth layer.
 The JSON store is intentionally a reliable local foundation, not a substitute
 for a multi-user database. The gateway currently records execution lifecycle
 and replay but does not yet resume an interrupted model call from a checkpoint.
-Approvals still use the existing policy callback and are not durable approval
-requests. Browser reopen now queries the durable run list for the loaded
+Approvals now use owner-scoped durable records with immutable operation
+snapshots, schema fingerprints, operation hashes, expiry, and compare-and-set
+decisions. Active runs pause at `awaiting_approval` and resume the original
+tool call through the approval API. A gateway restart preserves pending
+approval history but intentionally does not resume a partially executed agent
+loop without a persisted checkpoint. Browser reopen now queries the durable run list for the loaded
 conversation and converts paused, failed, or cancelled in-flight messages into
 explicit recoverable error/stopped states without retrying side effects. The
 activity panel currently reflects structured stream blocks rather than

@@ -47,6 +47,46 @@ test("workspace store persists runs and replayable events", async () => {
   }
 });
 
+test("durable approvals use compare-and-set decisions and expire safely", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "deepseek-ui-approval-"));
+  const store = new WorkspaceStore(join(directory, "workspace.json"));
+  try {
+    await store.load();
+    const approval = await store.createApproval({
+      id: "approval-1",
+      owner: "alice",
+      workspaceId: "alice",
+      conversationId: "conversation-1",
+      runId: "run-1",
+      toolExecutionId: "run-1:tool-1",
+      toolId: "payments__charge",
+      arguments: { amount: 10 },
+      operationSnapshot: { name: "payments__charge", args: { amount: 10 } },
+      operationHash: "hash",
+      permissionClass: "destructive",
+      policyResult: "approval_required",
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+    const [approved, denied] = await Promise.all([
+      store.decideApproval(approval.id, "alice", "approved", "alice"),
+      store.decideApproval(approval.id, "alice", "denied", "alice"),
+    ]);
+    const finalApproval = await store.getApproval(approval.id, "alice");
+    assert.ok(finalApproval?.status === "approved" || finalApproval?.status === "denied");
+    assert.equal(approved?.decisionAt, denied?.decisionAt);
+    assert.equal((await store.getApproval(approval.id, "bob")), undefined);
+    const expired = await store.createApproval({
+      ...approval,
+      id: "approval-expired",
+      expiresAt: new Date(Date.now() - 1_000).toISOString(),
+    });
+    const expiredDecision = await store.decideApproval(expired.id, "alice", "approved", "alice");
+    assert.equal(expiredDecision?.status, "expired");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("workspace store serializes concurrent writers and preserves event order", async () => {
   const directory = await mkdtemp(join(tmpdir(), "deepseek-ui-concurrent-"));
   const file = join(directory, "workspace.json");

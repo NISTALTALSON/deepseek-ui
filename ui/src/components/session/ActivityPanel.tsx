@@ -1,5 +1,7 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { AssistantMessage, ReplyBlock, Session } from '../../services/chat/types.js'
+import { decideApproval, listApprovals, type ApprovalRecord } from '../../services/api/client.js'
+import { useSettings } from '../../services/settings.js'
 import styles from './ActivityPanel.module.css'
 
 const labelForBlock = (block: ReplyBlock) => {
@@ -39,6 +41,22 @@ const detailForBlock = (block: ReplyBlock) => {
 }
 
 export const ActivityPanel = ({ session }: { session: Session }) => {
+  const apiKey = useSettings((state) => state.apiKey) ?? ''
+  const [approvals, setApprovals] = useState<ApprovalRecord[]>([])
+  useEffect(() => {
+    let active = true
+    void listApprovals(apiKey).then((items) => {
+      if (active) {
+        setApprovals(items.filter((item) => item.conversationId === session.id))
+      }
+    }).catch(() => {
+      if (active) {
+        setApprovals([])
+      }
+    })
+    return () => { active = false }
+  }, [apiKey, session.id])
+  const pendingApprovals = approvals.filter((approval) => approval.status === 'pending')
   const activities = useMemo(() => {
     const result: { message: AssistantMessage; block: ReplyBlock; label: string; detail: string }[] = []
     for (const message of session.messages) {
@@ -69,6 +87,24 @@ export const ActivityPanel = ({ session }: { session: Session }) => {
         </span>
       </div>
       <div className={styles.list}>
+        {pendingApprovals.map((approval) => (
+          <div className={styles.item} key={approval.id}>
+            <div className={styles.itemTitle}>
+              <span className={styles.dot} data-kind="tool" />
+              <span>Approval required</span>
+            </div>
+            <div className={styles.detail}>
+              {approval.toolId} · {approval.permissionClass}
+            </div>
+            <div className={styles.detail}>
+              {JSON.stringify(approval.arguments)}
+            </div>
+            <div>
+              <button type="button" onClick={() => void decideApproval(apiKey, approval.id, 'approved').then((next) => setApprovals((current) => current.map((item) => item.id === next.id ? next : item)))}>Approve</button>
+              <button type="button" onClick={() => void decideApproval(apiKey, approval.id, 'denied').then((next) => setApprovals((current) => current.map((item) => item.id === next.id ? next : item)))}>Deny</button>
+            </div>
+          </div>
+        ))}
         {activities.length === 0 ? (
           <div className={styles.empty}>Tool calls and research sources will appear here.</div>
         ) : (

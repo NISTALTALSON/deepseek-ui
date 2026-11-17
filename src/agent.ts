@@ -3,6 +3,7 @@ import { McpHub } from "./mcp.js";
 import { Permissions } from "./permissions.js";
 import { SkillRegistry } from "./skills.js";
 import type { Message, ToolCall, ToolSpec } from "./types.js";
+import type { PermissionClass } from "./permissions.js";
 
 type JsonSchema = Record<string, unknown>;
 
@@ -55,6 +56,7 @@ export type AgentEvent =
   | { type: "text"; delta: string }
   | { type: "tool_start"; id: string; name: string; args: unknown }
   | { type: "tool_denied"; id: string; name: string }
+  | { type: "approval_required"; id: string; name: string; args: unknown; approvalId: string; permissionClass: PermissionClass; expiresAt: string }
   | { type: "tool_result"; id: string; name: string; output: string }
   | { type: "done"; usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } };
 
@@ -72,6 +74,7 @@ export interface AgentDeps {
   projectInstructions?: string;
   knowledgeSearch?: (query: string) => Promise<string>;
   allowedTools?: ReadonlySet<string>;
+  requestApproval?: (input: { call: ToolCall; args: unknown; spec: ToolSpec; permissionClass: PermissionClass }) => Promise<{ approvalId: string; expiresAt: string; wait: Promise<boolean> }>;
 }
 
 const messageChars = (message: Message): number => JSON.stringify(message).length;
@@ -133,6 +136,7 @@ export class Agent {
           additionalProperties: false,
         },
         readOnly: true,
+        permissionClass: "read-only",
       });
     }
     return this.d.allowedTools
@@ -218,7 +222,24 @@ export class Agent {
             : name === "knowledge_search"
               ? Boolean(this.d.knowledgeSearch)
             : this.d.enabledMcpServers?.has(name.split("__", 1)[0]) ?? false;
-        if (!(await this.d.permissions.authorizeSelected(name, args, selected))) {
+        const spec = this.toolSpec(name);
+        const policy = this.d.permissions.decide(name);
+        if (!selected || !spec || policy === "deny") {
+          this.messages.push({ role: "tool", tool_call_id: call.id, content: "Denied by user policy." });
+          yield { type: "tool_denied", id: call.id, name };
+          continue;
+        }
+        const permissionClass = spec.permissionClass ?? (spec.readOnly ? "read-only" : "external-side-effect");
+        const needsApproval = policy === "ask" || permissionClass !== "read-only";
+        if (needsApproval && this.d.requestApproval) {
+          const approval = await this.d.requestApproval({ call, args, spec, permissionClass });
+          yield { type: "approval_required", id: call.id, name, args, approvalId: approval.approvalId, permissionClass, expiresAt: approval.expiresAt };
+          if (!(await approval.wait)) {
+            this.messages.push({ role: "tool", tool_call_id: call.id, content: "Denied by approval policy." });
+            yield { type: "tool_denied", id: call.id, name };
+            continue;
+          }
+        } else if (!(await this.d.permissions.authorizeSelected(name, args, selected))) {
           this.messages.push({ role: "tool", tool_call_id: call.id, content: "Denied by user policy." });
           yield { type: "tool_denied", id: call.id, name };
           continue;

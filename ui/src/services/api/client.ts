@@ -220,6 +220,46 @@ export type RunRecord = {
   error?: string
 }
 
+export type ApprovalRecord = {
+  id: string
+  runId: string
+  conversationId: string
+  toolId: string
+  arguments: unknown
+  permissionClass: string
+  status: string
+  expiresAt: string
+  createdAt: string
+  error?: string
+}
+
+export const listApprovals = async (
+  apiKey: string,
+  workspace = 'local',
+  signal?: AbortSignal
+): Promise<ApprovalRecord[]> => {
+  const response = await request(`${API_ORIGIN}/approvals`, {
+    headers: { ...anthropicHeaders(apiKey, false), 'x-deepseek-ui-workspace': workspace },
+    signal,
+  })
+  const body = (await response.json()) as { approvals?: ApprovalRecord[] }
+  return Array.isArray(body.approvals) ? body.approvals : []
+}
+
+export const decideApproval = async (
+  apiKey: string,
+  approvalId: string,
+  decision: 'approved' | 'denied',
+  workspace = 'local'
+): Promise<ApprovalRecord> => {
+  const response = await request(`${API_ORIGIN}/approvals/${encodeURIComponent(approvalId)}`, {
+    method: 'POST',
+    headers: { ...anthropicHeaders(apiKey, false), 'content-type': 'application/json', 'x-deepseek-ui-workspace': workspace },
+    body: JSON.stringify({ decision }),
+  })
+  return ((await response.json()) as { approval: ApprovalRecord }).approval
+}
+
 export const listRuns = async (
   apiKey: string,
   workspace = 'local',

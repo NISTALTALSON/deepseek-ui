@@ -136,6 +136,31 @@ export type IntegrationRecord = {
   updatedAt: string;
 };
 
+export type ApprovalStatus = "pending" | "approved" | "denied" | "expired" | "cancelled" | "executing" | "completed" | "failed" | "requires_reapproval";
+export type ApprovalRecord = {
+  id: string;
+  owner: string;
+  workspaceId: string;
+  conversationId: string;
+  runId: string;
+  toolExecutionId: string;
+  toolId: string;
+  arguments: unknown;
+  operationSnapshot: Record<string, unknown>;
+  operationHash: string;
+  schemaFingerprint?: string;
+  permissionClass: string;
+  policyResult: string;
+  createdAt: string;
+  expiresAt: string;
+  status: ApprovalStatus;
+  decisionActor?: string;
+  decisionAt?: string;
+  executionStatus?: string;
+  result?: string;
+  error?: string;
+};
+
 export interface PersistenceAdapter {
   load(): Promise<void>;
   conversation(input?: Partial<ConversationRecord>): Promise<ConversationRecord>;
@@ -172,6 +197,11 @@ export interface PersistenceAdapter {
   listIntegrations(owner: string): Promise<IntegrationRecord[]>;
   updateIntegration(id: string, owner: string, patch: Partial<IntegrationRecord>): Promise<IntegrationRecord | undefined>;
   deleteIntegration(id: string, owner: string): Promise<boolean>;
+  createApproval(input: Omit<ApprovalRecord, "createdAt" | "status"> & Partial<Pick<ApprovalRecord, "createdAt" | "status">>): Promise<ApprovalRecord>;
+  listApprovals(owner: string, statuses?: ApprovalStatus[]): Promise<ApprovalRecord[]>;
+  getApproval(id: string, owner: string): Promise<ApprovalRecord | undefined>;
+  decideApproval(id: string, owner: string, decision: "approved" | "denied", actor: string): Promise<ApprovalRecord | undefined>;
+  updateApproval(id: string, owner: string, patch: Partial<ApprovalRecord>): Promise<ApprovalRecord | undefined>;
 }
 
 type StoreData = {
@@ -180,13 +210,13 @@ type StoreData = {
   runs: RunRecord[];
   events: WorkspaceEvent[];
   toolExecutions: ToolExecutionRecord[];
-  approvals: Array<Record<string, unknown>>;
   projects: ProjectRecord[];
   memories: Array<Record<string, unknown>>;
   artifacts: Array<Record<string, unknown>>;
   files: FileRecord[];
   knowledgeChunks: KnowledgeChunkRecord[];
   agents: AgentRecord[];
+  approvals: ApprovalRecord[];
   integrations: IntegrationRecord[];
 };
 
@@ -601,6 +631,60 @@ export class WorkspaceStore implements PersistenceAdapter {
       if (index < 0) return false;
       this.data.integrations.splice(index, 1);
       return true;
+    });
+  }
+
+  async createApproval(input: Omit<ApprovalRecord, "createdAt" | "status"> & Partial<Pick<ApprovalRecord, "createdAt" | "status">>): Promise<ApprovalRecord> {
+    return this.mutate(() => {
+      const approval: ApprovalRecord = {
+        ...input,
+        createdAt: input.createdAt ?? new Date().toISOString(),
+        status: input.status ?? "pending",
+      };
+      this.data.approvals.push(approval);
+      return approval;
+    });
+  }
+
+  async listApprovals(owner: string, statuses?: ApprovalStatus[]): Promise<ApprovalRecord[]> {
+    await this.load();
+    return this.data.approvals
+      .filter((approval) => approval.owner === owner && (!statuses || statuses.includes(approval.status)))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async getApproval(id: string, owner: string): Promise<ApprovalRecord | undefined> {
+    await this.load();
+    return this.data.approvals.find((approval) => approval.id === id && approval.owner === owner);
+  }
+
+  async decideApproval(id: string, owner: string, decision: "approved" | "denied", actor: string): Promise<ApprovalRecord | undefined> {
+    return this.mutate(() => {
+      const approval = this.data.approvals.find((item) => item.id === id && item.owner === owner);
+      if (!approval) return undefined;
+      if (approval.status !== "pending") return approval;
+      if (Date.parse(approval.expiresAt) <= Date.now()) {
+        approval.status = "expired";
+        approval.decisionAt = new Date().toISOString();
+        return approval;
+      }
+      approval.status = decision;
+      approval.decisionActor = actor;
+      approval.decisionAt = new Date().toISOString();
+      return approval;
+    });
+  }
+
+  async updateApproval(id: string, owner: string, patch: Partial<ApprovalRecord>): Promise<ApprovalRecord | undefined> {
+    return this.mutate(() => {
+      const approval = this.data.approvals.find((item) => item.id === id && item.owner === owner);
+      if (!approval) return undefined;
+      const { id: _id, owner: _owner, workspaceId: _workspaceId, conversationId: _conversationId, runId: _runId,
+        toolExecutionId: _toolExecutionId, toolId: _toolId, arguments: _arguments, operationSnapshot: _operationSnapshot,
+        operationHash: _operationHash, schemaFingerprint: _schemaFingerprint, permissionClass: _permissionClass,
+        policyResult: _policyResult, createdAt: _createdAt, expiresAt: _expiresAt, ...mutable } = patch;
+      Object.assign(approval, mutable, { id: approval.id, owner: approval.owner });
+      return approval;
     });
   }
 }

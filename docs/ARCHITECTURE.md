@@ -60,11 +60,16 @@ the gateway is the security and execution boundary.
   account/authentication system, project store, or cross-device sync.
 - Only DeepSeek and the deterministic mock provider are wired. Additional
   providers should implement `ModelProvider` rather than modify `Agent`.
-- Approval is currently non-durable. A production approval flow needs a run ID,
-  checkpoint store, resumable tool call, and UI approval card.
+- Consequential tool calls now create owner-scoped durable approval records with
+  immutable arguments, schema fingerprints, operation hashes, expiry, and
+  compare-and-set decisions. The active run pauses at `awaiting_approval` and
+  resumes the original call after approval through `/approvals/:id`. A gateway
+  restart preserves the approval record but intentionally leaves the run paused;
+  it does not claim checkpoint-level continuation yet.
 - Gateway startup marks queued/running runs as `paused`, and never replays their
-  tool calls automatically. Durable continuation from a checkpoint is still
-  intentionally not claimed.
+  tool calls automatically. Pending approvals remain inspectable and cannot be
+  approved by another owner, but continuation after process restart still
+  requires a future persisted agent checkpoint.
 - Run event replay is available through the SSE form of
   `GET /runs/:id/events` with `Last-Event-ID`; the UI client has a reusable
   `streamRunEvents` helper. On conversation load, the UI also queries
