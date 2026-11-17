@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/cli.ts",
+    "gateway": "tsx src/gateway.ts",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test test/*.test.ts"
   },

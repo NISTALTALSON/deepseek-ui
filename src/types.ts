@@ -25,9 +25,16 @@ export interface ToolSpec {
   name: string;
   description: string;
   parameters: Record<string, unknown>; // JSON Schema
+  readOnly?: boolean;
+  timeoutMs?: number;
+  retries?: number;
 }
 
 export type StreamEvent =
   | { type: "reasoning"; delta: string }
   | { type: "text"; delta: string }
-  | { type: "done"; message: AssistantMessage };
+  | {
+      type: "done";
+      message: AssistantMessage;
+      usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+    };

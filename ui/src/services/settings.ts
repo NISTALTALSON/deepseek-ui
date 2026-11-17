@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { TtsVoice } from './api/speech.js'
 import { normalizeLocation, type UserLocation } from './location.js'
+import type { ChatModel } from './api/types.js'
 
 export type Locale = 'zh-CN' | 'en-US'
 
@@ -17,6 +18,7 @@ type Settings = {
   thinking: boolean
   search: boolean
   siderCollapsed: boolean
+  model: ChatModel
 }
 
 const KEYS = {
@@ -96,6 +98,7 @@ export const useSettings = create<Settings>(() => ({
   thinking: read(KEYS.thinking) === 'true',
   search: read(KEYS.search) === 'true',
   siderCollapsed: read(KEYS.siderCollapsed) === 'true',
+  model: (read('chat-demo:model') === 'deepseek-v4-pro' ? 'deepseek-v4-pro' : 'deepseek-flash') as ChatModel,
 }))
 
 export const setLocale = (locale: Locale) => {
@@ -137,4 +140,9 @@ export const setSearch = (search: boolean) => {
 export const setSiderCollapsed = (siderCollapsed: boolean) => {
   write(KEYS.siderCollapsed, String(siderCollapsed))
   useSettings.setState({ siderCollapsed })
+}
+
+export const setModel = (model: ChatModel) => {
+  write('chat-demo:model', model)
+  useSettings.setState({ model })
 }

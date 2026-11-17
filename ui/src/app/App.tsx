@@ -25,6 +25,7 @@ import { CollapsedSider } from '../components/sider/CollapsedSider.js'
 import { closeMobileSider } from '../components/sider/mobileSiderState.js'
 import { MobileSider, Sider } from '../components/sider/Sider.js'
 import styles from './App.module.css'
+import { WorkspaceDialog } from '../components/workspace/WorkspaceDialog.js'
 
 export const App = () => {
   const t = useTranslate()
@@ -133,6 +134,7 @@ export const App = () => {
         <SearchPanel />
       </div>
       <SettingsDialog />
+      <WorkspaceDialog />
       <Toast />
     </>
   )

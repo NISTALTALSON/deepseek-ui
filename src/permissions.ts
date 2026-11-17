@@ -30,6 +30,14 @@ export class Permissions {
     return this.cfg.default;
   }
 
+  hasRule(tool: string): boolean {
+    return this.cfg.rules.some((rule) => globToRegExp(rule.tool).test(tool));
+  }
+
+  async authorizeSelected(tool: string, args: unknown, _selected: boolean): Promise<boolean> {
+    return this.authorize(tool, args);
+  }
+
   async authorize(tool: string, args: unknown): Promise<boolean> {
     const d = this.decide(tool);
     if (d === "allow") return true;

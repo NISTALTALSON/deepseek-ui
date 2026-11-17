@@ -50,14 +50,20 @@ export class SkillRegistry {
     }
   }
 
-  list(): Skill[] {
-    return [...this.skills.values()];
+  list(names?: ReadonlySet<string>): Skill[] {
+    const skills = [...this.skills.values()];
+    return names ? skills.filter((skill) => names.has(skill.name)) : skills;
   }
 
-  catalog(): string {
-    if (!this.skills.size) return "";
-    const lines = this.list().map((s) => `- ${s.name}: ${s.description}`);
+  catalog(names?: ReadonlySet<string>): string {
+    const skills = this.list(names);
+    if (!skills.length) return "";
+    const lines = skills.map((s) => `- ${s.name}: ${s.description}`);
     return `You have skills. When a task matches one, call load_skill with its name BEFORE starting.\n${lines.join("\n")}`;
+  }
+
+  has(name: string): boolean {
+    return this.skills.has(name);
   }
 
   async load(name: string): Promise<string> {

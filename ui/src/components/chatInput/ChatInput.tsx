@@ -32,6 +32,7 @@ import { useVoiceInput } from './useVoiceInput.js'
 import { VoiceButton } from './VoiceButton.js'
 import { Spectrum } from './Spectrum.js'
 import { useTranslate } from '../../i18n/index.js'
+import { openWorkspace, useWorkspace } from '../../services/workspace.js'
 import styles from './ChatInput.module.css'
 
 /** 输入框：自适应高度的文本框 + 文件 + 深度思考与智能搜索开关 + 语音输入 + 发送 / 停止 */
@@ -53,6 +54,8 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
   const importingHistory = useChatStore((state) => state.importingHistory)
   const isMobile = useIsMobile()
   const search = useSettings((state) => state.search)
+  const enabledSkills = useWorkspace((state) => state.enabledSkills)
+  const enabledIntegrations = useWorkspace((state) => state.integrations.filter((item) => item.enabled))
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const togglesRef = useRef<HTMLDivElement>(null)
@@ -140,6 +143,7 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
     ) {
       return
     }
+
     // 文本与上传完成态由提交动作读取最新快照，不使用上一次渲染的草稿。
     if (!ensureApiKey() || !sendMessage(sessionId)) {
       return
@@ -202,6 +206,16 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
       <div className={styles.functionRow}>
         {/* 深度思考 / 智能搜索开关，tooltip 在按钮上方 */}
         <div ref={togglesRef} className={styles.toggles}>
+          <Tooltip content="Configure skills, plugins, MCP servers, and connectors">
+            <button
+              type="button"
+              className={clsx(styles.toggle, enabledSkills.length > 0 && styles.selected)}
+              aria-label="Open workspace"
+              onClick={() => openWorkspace('skills')}
+            >
+              <span className={styles.toggleLabel}>Workspace{enabledIntegrations.length > 1 ? ` · ${enabledIntegrations.length}` : ''}</span>
+            </button>
+          </Tooltip>
           <Tooltip content={t('deactivatedThinkTooltip')}>
             <button
               type="button"
