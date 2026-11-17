@@ -34,6 +34,7 @@ export type GatewayCapabilities = {
   tools: number;
   providers: Array<{ id: string; name: string; configured: boolean }>;
   toolsList?: Array<{ name: string; description: string; readOnly?: boolean; timeoutMs?: number }>;
+  mcpDetails?: Array<{ id: string; status: "connected" | "error"; error?: string; tools: string[] }>;
 };
 
 type AnthropicContent =
@@ -216,6 +217,7 @@ export const createGateway = async (config: GatewayConfig = {}) => {
         toolsList: mcp.tools().map((tool) => ({
           name: tool.name, description: tool.description, readOnly: tool.readOnly, timeoutMs: tool.timeoutMs,
         })),
+        mcpDetails: mcp.serverDetails(),
       };
       json(res, 200, capabilities);
       return;
@@ -235,6 +237,28 @@ export const createGateway = async (config: GatewayConfig = {}) => {
       return;
     }
     const requestUrl = new URL(req.url ?? "/", "http://localhost");
+
+    if (requestUrl.pathname === "/skills" && req.method === "GET") {
+      json(res, 200, {
+        skills: skills.list().map((skill) => ({
+          name: skill.name, description: skill.description, version: skill.version, scope: skill.scope,
+        })),
+      });
+      return;
+    }
+    if (requestUrl.pathname === "/tools" && req.method === "GET") {
+      json(res, 200, {
+        tools: mcp.tools().map((tool) => ({
+          name: tool.name, description: tool.description, parameters: tool.parameters,
+          readOnly: tool.readOnly, timeoutMs: tool.timeoutMs, retries: tool.retries, source: "mcp",
+        })),
+      });
+      return;
+    }
+    if (requestUrl.pathname === "/mcp/servers" && req.method === "GET") {
+      json(res, 200, { servers: mcp.serverDetails() });
+      return;
+    }
 
     if (requestUrl.pathname === "/agents" && req.method === "GET") {
       json(res, 200, { agents: await store.listAgents(owner, requestUrl.searchParams.get("includeDisabled") === "true") });

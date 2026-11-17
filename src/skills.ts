@@ -11,6 +11,8 @@ export interface Skill {
   description: string;
   dir: string;
   file: string;
+  version?: string;
+  scope?: string;
 }
 
 export function parseFrontmatter(text: string): { meta: Record<string, string>; body: string } {
@@ -42,7 +44,10 @@ export class SkillRegistry {
         try {
           const { meta } = parseFrontmatter(await readFile(file, "utf8"));
           const name = meta.name || e.name;
-          this.skills.set(name, { name, description: meta.description ?? "", dir, file });
+          this.skills.set(name, {
+            name, description: meta.description ?? "", dir, file,
+            version: meta.version, scope: meta.scope ?? "gateway",
+          });
         } catch {
           continue; // folder without SKILL.md
         }

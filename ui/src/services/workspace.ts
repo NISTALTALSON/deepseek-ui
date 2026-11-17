@@ -4,7 +4,7 @@ import { setModel } from './settings.js'
 import { useSettings } from './settings.js'
 import { API_ORIGIN } from './api/client.js'
 
-export type WorkspaceTab = 'models' | 'skills' | 'plugins' | 'mcp' | 'connectors'
+export type WorkspaceTab = 'models' | 'skills' | 'tools' | 'plugins' | 'mcp' | 'connectors'
 export type IntegrationKind = 'plugin' | 'connector' | 'mcp'
 
 export type ModelOption = {
@@ -45,44 +45,7 @@ export const MODEL_OPTIONS: ModelOption[] = [
   },
 ]
 
-const BUILT_IN_INTEGRATIONS: Integration[] = [
-  {
-    id: 'web-search',
-    name: 'Web search',
-    description: 'Search the web and read links when a response needs current information.',
-    kind: 'plugin',
-    enabled: false,
-    status: 'available',
-    detail: 'Configure a real MCP server to enable this integration.',
-  },
-  {
-    id: 'filesystem',
-    name: 'Filesystem',
-    description: 'Connect a local MCP filesystem server for project files.',
-    kind: 'mcp',
-    enabled: false,
-    status: 'available',
-    detail: 'Configure in deepseek-ui.config.json',
-  },
-  {
-    id: 'github',
-    name: 'GitHub',
-    description: 'Bring repositories, issues, and pull requests into your workspace.',
-    kind: 'connector',
-    enabled: false,
-    status: 'available',
-    detail: 'Connector setup',
-  },
-  {
-    id: 'slack',
-    name: 'Slack',
-    description: 'Search and summarize conversations from a connected Slack workspace.',
-    kind: 'connector',
-    enabled: false,
-    status: 'available',
-    detail: 'Connector setup',
-  },
-]
+
 
 const read = (key: string, fallback: string) => {
   try {
@@ -116,16 +79,18 @@ type WorkspaceState = {
   tab: WorkspaceTab
   gatewayOnline: boolean
   gatewaySkills: string[]
+  gatewayTools: Array<{ name: string; description: string; readOnly?: boolean }>
 }
 
 export const useWorkspace = create<WorkspaceState>(() => ({
   model: read('deepseek-ui:model', read('chat-demo:model', 'deepseek-flash')) as ChatModel,
   enabledSkills: readJson('deepseek-ui:skills', []),
-  integrations: readJson('deepseek-ui:integrations', BUILT_IN_INTEGRATIONS),
+  integrations: readJson('deepseek-ui:integrations', []),
   open: false,
   tab: 'models',
   gatewayOnline: false,
   gatewaySkills: [],
+  gatewayTools: [],
 }))
 
 export const openWorkspace = (tab: WorkspaceTab = 'models') =>
@@ -178,8 +143,9 @@ export const refreshGatewayCapabilities = async () => {
     const data = (await response.json()) as {
       skills?: string[]
       mcpServers?: string[]
+      toolsList?: Array<{ name: string; description: string; readOnly?: boolean }>
     }
-    const current = useWorkspace.getState().integrations
+    const current = useWorkspace.getState().integrations.filter((item) => item.kind === 'mcp' && item.status === 'connected')
     const integrations = [...current]
     for (const server of data.mcpServers ?? []) {
       const existing = integrations.find((item) => item.id === server)
@@ -202,6 +168,7 @@ export const refreshGatewayCapabilities = async () => {
     useWorkspace.setState({
       gatewayOnline: true,
       gatewaySkills: data.skills ?? [],
+      gatewayTools: data.toolsList ?? [],
       integrations,
     })
   } catch {

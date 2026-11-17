@@ -21,6 +21,7 @@ export interface McpConfig {
 export class McpHub {
   private clients = new Map<string, Client>();
   private specs: ToolSpec[] = [];
+  private statuses = new Map<string, { status: "connected" | "error"; error?: string }>();
 
   async connect(cfg: McpConfig): Promise<void> {
     for (const [name, s] of Object.entries(cfg.servers)) {
@@ -33,6 +34,7 @@ export class McpHub {
         const client = new Client({ name: "deepseek-ui", version: "0.0.1" });
         await client.connect(transport);
         this.clients.set(name, client);
+        this.statuses.set(name, { status: "connected" });
         const { tools } = await client.listTools();
         for (const t of tools) {
           this.specs.push({
@@ -45,6 +47,7 @@ export class McpHub {
           });
         }
       } catch (err) {
+        this.statuses.set(name, { status: "error", error: (err as Error).message });
         console.error(`[mcp] failed to start "${name}":`, (err as Error).message);
       }
     }
@@ -52,6 +55,14 @@ export class McpHub {
 
   serverNames(): string[] {
     return [...this.clients.keys()];
+  }
+
+  serverDetails(): Array<{ id: string; status: "connected" | "error"; error?: string; tools: string[] }> {
+    return [...this.statuses.entries()].map(([id, status]) => ({
+      id,
+      ...status,
+      tools: this.specs.filter((tool) => tool.name.startsWith(`${id}__`)).map((tool) => tool.name),
+    }));
   }
 
   tools(enabledServers?: ReadonlySet<string>): ToolSpec[] {

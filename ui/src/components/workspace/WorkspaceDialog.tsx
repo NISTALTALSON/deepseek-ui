@@ -16,6 +16,7 @@ import styles from './WorkspaceDialog.module.css'
 const tabs: { id: WorkspaceTab; label: string }[] = [
   { id: 'models', label: 'Models' },
   { id: 'skills', label: 'Skills' },
+  { id: 'tools', label: 'Tools' },
   { id: 'plugins', label: 'Plugins' },
   { id: 'mcp', label: 'MCP servers' },
   { id: 'connectors', label: 'Connectors' },
@@ -58,6 +59,7 @@ const WorkspaceContent = () => {
       <div className={styles.panel}>
         {tab === 'models' ? <ModelsPanel /> : null}
         {tab === 'skills' ? <SkillsPanel /> : null}
+        {tab === 'tools' ? <ToolsPanel /> : null}
         {tab === 'plugins' ? <IntegrationPanel kind="plugin" /> : null}
         {tab === 'mcp' ? <IntegrationPanel kind="mcp" /> : null}
         {tab === 'connectors' ? <IntegrationPanel kind="connector" /> : null}
@@ -157,6 +159,27 @@ const IntegrationPanel = ({ kind }: { kind: 'plugin' | 'mcp' | 'connector' }) =>
             </Button>
           </div>
         ))}
+      </div>
+    </>
+  )
+}
+
+const ToolsPanel = () => {
+  const tools = useWorkspace((state) => state.gatewayTools)
+  return (
+    <>
+      <h2 className={styles.heading}>Available tools</h2>
+      <p className={styles.description}>These are the tools the gateway actually discovered. Agents must explicitly allow them.</p>
+      <div className={styles.cards}>
+        {tools.map((tool) => (
+          <div className={styles.card} key={tool.name}>
+            <div className={styles.cardBody}>
+              <div className={styles.cardTitle}>{tool.name}<span className={styles.badge}>{tool.readOnly ? 'Read-only' : 'Policy checked'}</span></div>
+              <div className={styles.cardText}>{tool.description}</div>
+            </div>
+          </div>
+        ))}
+        {!tools.length ? <div className={styles.empty}>No tools are currently discovered from configured MCP servers.</div> : null}
       </div>
     </>
   )
