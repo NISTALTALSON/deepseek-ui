@@ -144,7 +144,8 @@ const hasFile = (body: CreateMessageRequest) =>
 export async function* streamMessage(
   apiKey: string,
   body: CreateMessageRequest,
-  signal: AbortSignal
+  signal: AbortSignal,
+  extraHeaders: Record<string, string> = {}
 ): AsyncGenerator<MessageStreamEvent> {
   const response = await request(`${ANTHROPIC_BASE_URL}/messages`, {
     method: 'POST',
@@ -152,6 +153,7 @@ export async function* streamMessage(
       ...anthropicHeaders(apiKey, hasFile(body)),
       'Content-Type': 'application/json',
       Accept: 'text/event-stream',
+      ...extraHeaders,
     },
     body: JSON.stringify({ ...body, stream: true }),
     signal,
@@ -160,6 +162,7 @@ export async function* streamMessage(
   if (!response.body || !contentType.includes('text/event-stream')) {
     throw await readErrorResponse(response, 'protocol', '')
   }
+
   for await (const { event: eventName, data } of readServerSentEvents(response.body, signal)) {
     let payload: unknown
     try {
@@ -186,4 +189,85 @@ export async function* streamMessage(
   }
   // 服务端没有提供错误内容时保持为空，不推测断流原因。
   throw new ApiError('interrupted', '')
+}
+
+export type RunEvent = {
+  id: string
+  version: 1
+  runId: string
+  conversationId: string
+  sequence: number
+  type: string
+  timestamp: string
+  payload: Record<string, unknown>
+}
+
+export type RunStatus =
+  | 'queued'
+  | 'running'
+  | 'awaiting_approval'
+  | 'paused'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'expired'
+
+export type RunRecord = {
+  id: string
+  conversationId: string
+  status: RunStatus
+  updatedAt: string
+  error?: string
+}
+
+export const listRuns = async (
+  apiKey: string,
+  workspace = 'local',
+  signal?: AbortSignal
+): Promise<RunRecord[]> => {
+  const response = await request(`${API_ORIGIN}/runs`, {
+    method: 'GET',
+    headers: {
+      ...anthropicHeaders(apiKey, false),
+      'x-deepseek-ui-workspace': workspace,
+    },
+    signal,
+  })
+  const body = (await response.json()) as { runs?: RunRecord[] }
+  return Array.isArray(body.runs) ? body.runs : []
+}
+
+/** Replays durable gateway events after a disconnect, de-duplicating event IDs. */
+export async function* streamRunEvents(
+  apiKey: string,
+  runId: string,
+  signal: AbortSignal,
+  lastEventId?: string,
+  extraHeaders: Record<string, string> = {}
+): AsyncGenerator<RunEvent> {
+  const response = await request(`${API_ORIGIN}/runs/${encodeURIComponent(runId)}/events`, {
+    method: 'GET',
+    headers: {
+      ...anthropicHeaders(apiKey, false),
+      Accept: 'text/event-stream',
+      ...(lastEventId ? { 'Last-Event-ID': lastEventId } : {}),
+      ...extraHeaders,
+    },
+    signal,
+  })
+  if (!response.body) {
+    throw new ApiError('protocol', 'Run event stream has no body', response.status)
+  }
+  const seen = new Set<string>()
+  for await (const { data } of readServerSentEvents(response.body, signal)) {
+    try {
+      const event = JSON.parse(data) as RunEvent
+      if (!seen.has(event.id)) {
+        seen.add(event.id)
+        yield event
+      }
+    } catch {
+      // Ignore malformed replay frames; the normal message stream remains authoritative.
+    }
+  }
 }

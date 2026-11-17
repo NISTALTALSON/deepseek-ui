@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { createId } from '../../utils/id.js'
-import { ApiError, streamMessage } from '../api/client.js'
+import { ApiError, listRuns, streamMessage } from '../api/client.js'
 import type { ChatModel, CreateMessageRequest } from '../api/types.js'
 import { extractFileIds, getFileErrorCode, isRetryableApiError } from '../api/errors.js'
 import { cancelUpload, describeUploadError, uploadAttachment, useUploads } from '../attachments.js'
@@ -284,6 +284,7 @@ const settleInterrupted = (session: Session): Session => {
   ) {
     return session
   }
+
   return {
     ...session,
     messages: session.messages.map((m) =>
@@ -291,6 +292,60 @@ const settleInterrupted = (session: Session): Session => {
         ? settleReply(m, 'stopped', session.updatedAt)
         : m
     ),
+  }
+}
+
+const settleRecoveredRun = (session: Session, status: string, error?: string): Session => ({
+  ...session,
+  messages: session.messages.map((message) => {
+    if (
+      message.role !== 'assistant' ||
+      (message.status !== 'pending' && message.status !== 'streaming')
+    ) {
+      return message
+    }
+    return {
+      ...settleReply(message, status === 'cancelled' ? 'stopped' : 'error', Date.now()),
+      error: {
+        kind: 'interrupted',
+        message:
+          error ??
+          (status === 'paused'
+            ? 'This run was interrupted by a gateway restart and is paused for recovery.'
+            : `This run ended with status: ${status}.`),
+      },
+    }
+  }),
+})
+
+const reconcileSessionRun = async (id: string, session: Session) => {
+  if (
+    !session.messages.some(
+      (message) =>
+        message.role === 'assistant' &&
+        (message.status === 'pending' || message.status === 'streaming')
+    )
+  ) {
+    return
+  }
+  try {
+    const runs = await listRuns(useSettings.getState().apiKey ?? '', 'local')
+    const run = runs
+      .filter((candidate) => candidate.conversationId === id)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
+    if (
+      !run ||
+      run.status === 'running' ||
+      run.status === 'queued' ||
+      run.status === 'awaiting_approval'
+    ) {
+      return
+    }
+    const recovered = settleRecoveredRun(session, run.status, run.error)
+    updateSession(id, () => recovered)
+    persist(id)
+  } catch {
+    // The local IndexedDB history remains usable when the optional gateway is offline.
   }
 }
 
@@ -357,6 +412,7 @@ const ensureSessionLoaded = (id: string): Promise<void> => {
       if (session !== stored) {
         persist(id)
       }
+      void reconcileSessionRun(id, session)
       trimSessionCache()
     } catch (error) {
       if (epoch === historyEpoch && sessionLoads.get(id) === load) {

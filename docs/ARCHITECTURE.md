@@ -62,9 +62,11 @@ the gateway is the security and execution boundary.
   intentionally not claimed.
 - Run event replay is available through the SSE form of
   `GET /runs/:id/events` with `Last-Event-ID`; the UI client has a reusable
-  `streamRunEvents` helper. The visible activity panel currently reflects the
-  structured message stream and does not yet reconcile an independently loaded
-  run journal after refresh.
+  `streamRunEvents` helper. On conversation load, the UI also queries
+  `GET /runs` and reconciles terminal or paused runs into explicit message
+  status without replaying side effects. The visible activity panel currently
+  reflects the structured message stream rather than independently rendering
+  the full run journal after refresh.
 - MCP transport is currently stdio-based. Remote Streamable HTTP and OAuth
   need a separate credential-safe transport layer.
 - Artifacts, long-term memory, project files, and evaluation scenarios need

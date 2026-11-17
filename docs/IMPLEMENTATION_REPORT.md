@@ -116,9 +116,10 @@ The JSON store is intentionally a reliable local foundation, not a substitute
 for a multi-user database. The gateway currently records execution lifecycle
 and replay but does not yet resume an interrupted model call from a checkpoint.
 Approvals still use the existing policy callback and are not durable approval
-requests. Browser reconnect logic is exposed as a replay helper but is not yet
-automatically integrated into the chat store. The activity panel currently
-reflects structured stream blocks rather than independently replaying run events
-after a full browser refresh. Remote MCP/OAuth, connector secrets,
+requests. Browser reopen now queries the durable run list for the loaded
+conversation and converts paused, failed, or cancelled in-flight messages into
+explicit recoverable error/stopped states without retrying side effects. The
+activity panel currently reflects structured stream blocks rather than
+independently replaying run events after a full browser refresh. Remote MCP/OAuth, connector secrets,
 artifact/file/project APIs, additional provider adapters, and evaluation
 benchmarks are still required for the full production vision.
