@@ -1569,26 +1569,63 @@ export const createGateway = async (config: GatewayConfig = {}) => {
     };
     const emitResearchResult = (name: string, id: string, output: string) => {
       const parsed = unwrapUntrustedOutput(output);
+      const toSearchItem = (result: Record<string, unknown>) => ({
+        type: "web_search_result",
+        title: String(result.title ?? ""),
+        url: String(result.url ?? ""),
+        snippet: String(result.snippet ?? ""),
+        site_icon: null,
+        site_name: String(result.domain ?? ""),
+        page_age: typeof result.publishedAt === "string" ? result.publishedAt : null,
+        encrypted_content: "",
+        provider: parsed?.provider,
+        is_mock: Boolean(parsed?.isMock),
+        retrieved_at: result.retrievedAt,
+        source_id: result.sourceId,
+        citation_index: result.citationIndex,
+      });
       if (name === "web_search") {
         const results = Array.isArray(parsed?.results) ? parsed.results as Array<Record<string, unknown>> : [];
         const content = parsed?.ok === true
-          ? results.map((result) => ({
-              type: "web_search_result",
-              title: String(result.title ?? ""),
-              url: String(result.url ?? ""),
-              snippet: String(result.snippet ?? ""),
-              site_icon: null,
-              site_name: String(result.domain ?? ""),
-              page_age: typeof result.publishedAt === "string" ? result.publishedAt : null,
-              encrypted_content: "",
-              provider: parsed.provider,
-              is_mock: Boolean(parsed.isMock),
-              retrieved_at: result.retrievedAt,
-              source_id: result.sourceId,
-              citation_index: result.citationIndex,
-            }))
+          ? results.map(toSearchItem)
           : [{ type: "web_search_tool_result_error", error_code: "unavailable" }];
         writeBlock({ type: "web_search_tool_result", tool_use_id: id, content, kind: "search" });
+        return;
+      }
+      if (name === "research_sources") {
+        // The full workflow discovers sources inside one tool call. Emit them as
+        // a completed search step so citations render and the source panel works.
+        const sources = Array.isArray(parsed?.sources) ? parsed.sources as Array<Record<string, unknown>> : [];
+        const queries = Array.isArray(parsed?.queries) ? parsed.queries.filter((query): query is string => typeof query === "string") : [];
+        if (parsed?.ok === true && sources.length) {
+          writeBlock({
+            type: "server_tool_use",
+            id,
+            name: "deepseek_web_search",
+            input: { action: "search", queries: queries.length ? queries : ["research"] },
+            caller: { type: "direct" },
+            kind: "search",
+            provider: parsed.provider,
+            isMock: parsed.isMock,
+          });
+          const sorted = [...sources].sort((a, b) => Number(a.citationIndex ?? 0) - Number(b.citationIndex ?? 0));
+          writeBlock({ type: "web_search_tool_result", tool_use_id: id, content: sorted.map(toSearchItem), kind: "search" });
+        } else if (parsed?.ok !== true) {
+          writeBlock({
+            type: "server_tool_use",
+            id,
+            name: "deepseek_web_search",
+            input: { action: "search", queries: ["research"] },
+            caller: { type: "direct" },
+            kind: "search",
+          });
+          writeBlock({
+            type: "web_search_tool_result",
+            tool_use_id: id,
+            content: [{ type: "web_search_tool_result_error", error_code: "unavailable" }],
+            kind: "search",
+          });
+        }
         return;
       }
       if (name === "web_fetch" || name === "web_extract") {

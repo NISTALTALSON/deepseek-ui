@@ -322,6 +322,44 @@ test("gateway resumes a checkpointed research call without re-executing it", asy
   }
 });
 
+test("research_sources run emits a visible search step with citations", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "dsh-gateway-run-"));
+  const provider = new ScriptedProvider();
+  const { gateway, base } = await startGateway({
+    provider: "mock",
+    dataFile: join(directory, "workspace.json"),
+    filesRoot: join(directory, "files"),
+    modelProvider: provider,
+  });
+  try {
+    provider.setScript([
+      { toolCalls: [{ name: "research_sources", args: { action: "run", question: "quantum qubit milestones" } }] },
+      { text: "The sources disagree on qubit counts [citation:1]." },
+    ]);
+    const events = await readEvents(await postMessage(base, "c-workflow", "Compare quantum claims"));
+    const started = blocks(events).filter((block) => block.type === "server_tool_use");
+    assert.ok(started.length >= 1);
+    assert.ok(Array.isArray((started[0]?.input as Record<string, unknown>).queries));
+    const result = blocks(events).find((block) => block.type === "web_search_tool_result") as
+      | { content: Array<Record<string, unknown>> }
+      | undefined;
+    assert.ok(result);
+    assert.ok(result.content.length >= 1);
+    assert.equal(result.content[0]?.type, "web_search_result");
+    assert.equal(result.content[0]?.is_mock, true);
+    const sourceId = String(result.content[0]?.source_id);
+    assert.ok(sourceId);
+
+    const stored = (await (await fetch(`${base}/research/sources?conversationId=c-workflow`)).json()) as {
+      sources: Array<{ sourceId: string; status: string; content?: string }>;
+    };
+    assert.ok(stored.sources.some((source) => source.sourceId === sourceId));
+  } finally {
+    await gateway.close();
+    await removeDirectory(directory);
+  }
+});
+
 test("gateway reports an unconfigured provider instead of faking results", async () => {
   const directory = await mkdtemp(join(tmpdir(), "dsh-gateway-missing-"));
   const provider = new ScriptedProvider();
