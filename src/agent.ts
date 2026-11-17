@@ -123,6 +123,8 @@ export class Agent {
     if (this.d.knowledgeSearch) {
       t.push({
         name: "knowledge_search",
+        displayName: "Knowledge search",
+        source: "builtin",
         description: "Search the current project documents for relevant evidence. Use for questions about uploaded files or project knowledge.",
         parameters: {
           type: "object",

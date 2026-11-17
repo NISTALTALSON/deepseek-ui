@@ -23,8 +23,12 @@ export type Message =
 
 export interface ToolSpec {
   name: string;
+  displayName?: string;
+  source?: "builtin" | "skill" | "mcp" | "connector";
   description: string;
   parameters: Record<string, unknown>; // JSON Schema
+  schemaFingerprint?: string;
+  availability?: "available" | "unavailable";
   readOnly?: boolean;
   timeoutMs?: number;
   retries?: number;

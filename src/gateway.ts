@@ -33,7 +33,7 @@ export type GatewayCapabilities = {
   mcpServers: string[];
   tools: number;
   providers: Array<{ id: string; name: string; configured: boolean }>;
-  toolsList?: Array<{ name: string; description: string; readOnly?: boolean; timeoutMs?: number }>;
+  toolsList?: Array<{ name: string; displayName?: string; description: string; source?: string; readOnly?: boolean; timeoutMs?: number; schemaFingerprint?: string }>;
   mcpDetails?: Array<{ id: string; status: "connected" | "error"; error?: string; tools: string[] }>;
 };
 
@@ -215,7 +215,8 @@ export const createGateway = async (config: GatewayConfig = {}) => {
           { id: "mock", name: "Local mock", configured: true },
         ],
         toolsList: mcp.tools().map((tool) => ({
-          name: tool.name, description: tool.description, readOnly: tool.readOnly, timeoutMs: tool.timeoutMs,
+          name: tool.name, displayName: tool.displayName, description: tool.description, source: tool.source,
+          readOnly: tool.readOnly, timeoutMs: tool.timeoutMs, schemaFingerprint: tool.schemaFingerprint,
         })),
         mcpDetails: mcp.serverDetails(),
       };
@@ -250,7 +251,8 @@ export const createGateway = async (config: GatewayConfig = {}) => {
       json(res, 200, {
         tools: mcp.tools().map((tool) => ({
           name: tool.name, description: tool.description, parameters: tool.parameters,
-          readOnly: tool.readOnly, timeoutMs: tool.timeoutMs, retries: tool.retries, source: "mcp",
+          displayName: tool.displayName, readOnly: tool.readOnly, timeoutMs: tool.timeoutMs,
+          retries: tool.retries, source: tool.source ?? "mcp", schemaFingerprint: tool.schemaFingerprint,
         })),
       });
       return;

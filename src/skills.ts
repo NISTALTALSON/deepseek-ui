@@ -81,6 +81,8 @@ export class SkillRegistry {
   toolSpec(): ToolSpec {
     return {
       name: "load_skill",
+      displayName: "Load skill",
+      source: "skill",
       description: "Load the full instructions of a skill by name.",
       parameters: { type: "object", properties: { name: { type: "string" } }, required: ["name"] },
     };

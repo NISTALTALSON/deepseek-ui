@@ -81,6 +81,25 @@ fallback.
 **Files:** `src/knowledge.ts`, `src/persistence.ts`, `src/gateway.ts`,
 `ui/src/services/projects.ts`, `ui/src/components/projects/`.
 
+### Agent ecosystem milestone
+
+**Implemented:** Persistent owner-scoped agents with version snapshots, CRUD,
+duplicate/delete/enable controls, provider/model/instruction configuration,
+skill and tool allowlists, project allowlists, agent selection in the chat
+composer, backend-enforced execution, and conversation metadata association.
+The agent builder uses the real gateway skill and tool discovery data. The
+gateway now exposes `/agents`, `/skills`, `/tools`, `/mcp/servers`, and enriched
+`/capabilities` responses. Existing MCP tools retain schema validation,
+timeouts, retries, bounded untrusted observations, and policy enforcement.
+
+**Validated:** Agent CRUD/version persistence, owner isolation, selected-agent
+mock execution, UI type-check, UI lint, production build, and the complete
+root suite (20 passing tests).
+
+**Files:** `src/persistence.ts`, `src/agent.ts`, `src/gateway.ts`,
+`src/mcp.ts`, `src/skills.ts`, `ui/src/services/agents.ts`,
+`ui/src/components/agents/AgentBuilder.tsx`.
+
 ### Milestone 4 — providers
 
 **Completed:** `ModelProvider` is now the agent dependency. DeepSeek and the
@@ -103,7 +122,7 @@ scenarios, cost dashboards, OpenTelemetry export, and a production auth layer.
 
 ## Validation results
 
-- Root tests: **18 passed, 0 failed**
+- Root tests: **20 passed, 0 failed**
 - Root TypeScript type-check: **passed**
 - UI TypeScript type-check: **passed**
 - UI lint: **0 warnings, 0 errors**
@@ -117,6 +136,9 @@ scenarios, cost dashboards, OpenTelemetry export, and a production auth layer.
   and its event journal replayed over SSE with event IDs.
 - Projects/files integration: project creation, upload, extraction completion,
   keyword retrieval, source links, and unauthorized file access are covered.
+- Agent ecosystem integration: agent CRUD/versioning, owner isolation, selected
+  agent execution, real tool/skill discovery, and gateway policy boundaries are
+  covered.
 
 ## Configuration and external dependencies
 
@@ -138,7 +160,9 @@ requests. Browser reopen now queries the durable run list for the loaded
 conversation and converts paused, failed, or cancelled in-flight messages into
 explicit recoverable error/stopped states without retrying side effects. The
 activity panel currently reflects structured stream blocks rather than
-independently replaying run events after a full browser refresh. Remote MCP/OAuth,
-connector secrets, large-scale object storage, OCR for scanned PDFs/images,
-vector embeddings, reranking, and richer page-level previews are still required
-for the full production vision.
+independently replaying run events after a full browser refresh. Agent skill
+package upload/edit/version management, plugin package execution, remote
+Streamable HTTP MCP/OAuth, connector secrets, large-scale object storage, OCR
+for scanned PDFs/images, vector embeddings, reranking, and richer page-level
+previews are still required for the full production vision. The UI deliberately
+does not show unconfigured plugins/connectors as connected integrations.

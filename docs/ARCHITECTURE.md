@@ -72,18 +72,25 @@ the gateway is the security and execution boundary.
   status without replaying side effects. The visible activity panel currently
   reflects the structured message stream rather than independently rendering
   the full run journal after refresh.
-- MCP transport is currently stdio-based. Remote Streamable HTTP and OAuth
-  need a separate credential-safe transport layer.
+- MCP transport is currently stdio-based. The current SDK includes Streamable
+  HTTP primitives, but remote connection management, OAuth, SSRF/DNS-rebinding
+  defenses, and credential isolation are intentionally not exposed until they
+  can be implemented as a dedicated secure transport boundary.
 - Artifacts, long-term memory, project files, and evaluation scenarios need
   richer persistent domain models and APIs before their UI surfaces should
   claim to support them. Projects, uploaded files, extraction, keyword search,
   source links, and project-scoped conversations are now implemented; vector
   embeddings, reranking, and object-storage backends remain future work.
+- Agent ecosystem boundary: `AgentRecord` is persisted by the same adapter and
+  loaded by `src/gateway.ts` for every selected run. The gateway, not the
+  browser, applies the agent's provider/model, instructions, skill allowlist,
+  project allowlist, and tool allowlist. `/agents`, `/skills`, `/tools`, and
+  `/mcp/servers` expose the real configured runtime state.
 
 ## Implementation order
 
 1. Provider registry and offline/mock execution.
 2. Durable runs, approval, resume, and structured execution history.
 3. Persistent projects, files, artifacts, and memory.
-4. Remote MCP and connector credential flows.
+4. Secure remote MCP and connector credential flows.
 5. Additional provider adapters and evaluation harnesses.

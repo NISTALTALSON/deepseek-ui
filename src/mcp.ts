@@ -1,5 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { createHash } from "node:crypto";
 import type { ToolSpec } from "./types.js";
 
 // MCP client. Plug in any existing MCP server (Desktop Commander, filesystem,
@@ -39,8 +40,12 @@ export class McpHub {
         for (const t of tools) {
           this.specs.push({
             name: `${name}__${t.name}`,
-            description: t.description ?? "",
-            parameters: (t.inputSchema as Record<string, unknown>) ?? { type: "object", properties: {} },
+              displayName: t.name,
+              source: "mcp",
+              description: t.description ?? "",
+              parameters: (t.inputSchema as Record<string, unknown>) ?? { type: "object", properties: {} },
+              schemaFingerprint: createHash("sha256").update(JSON.stringify(t.inputSchema ?? {})).digest("hex"),
+              availability: "available",
             readOnly: t.annotations?.readOnlyHint === true,
             timeoutMs: s.timeoutMs,
             retries: s.retries,
