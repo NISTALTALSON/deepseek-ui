@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createServer, type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
 import { Agent } from "./agent.js";
-import { createProvider } from "./provider.js";
+import { createProvider, type ModelProvider } from "./provider.js";
 import { McpHub, type McpConfig } from "./mcp.js";
 import { Permissions, defaultPolicy, type PolicyConfig } from "./permissions.js";
 import { SkillRegistry } from "./skills.js";
@@ -11,6 +11,11 @@ import { FileStorage, MAX_FILE_BYTES, processFile, validateUpload } from "./know
 import type { AssistantMessage, Message, ToolCall } from "./types.js";
 import { connectorDefinitions, connectorToolSpecs, createOAuthTransaction, executeConnectorOperation } from "./connectors.js";
 import { decryptCredential, encryptCredential } from "./credentials.js";
+import { PageFetcher } from "./research/fetcher.js";
+import { ResearchEngine } from "./research/engine.js";
+import { RESEARCH_TOOL_NAMES, ResearchTools } from "./research/tools.js";
+import { resolveSearchProvider, type SearchProviderSelection } from "./research/search.js";
+import { defaultResearchLimits, type ResearchActivity, type ResearchRunContext } from "./research/types.js";
 
 export type GatewayConfig = {
   host?: string;
@@ -27,6 +32,15 @@ export type GatewayConfig = {
   maxRequestBytes?: number;
   dataFile?: string;
   filesRoot?: string;
+  /** Test/integration seam: overrides the model provider for every run. */
+  modelProvider?: ModelProvider;
+  research?: {
+    provider?: SearchProviderSelection;
+    apiKey?: string;
+    maxResults?: number;
+    maxPages?: number;
+    respectRobots?: boolean;
+  };
 };
 
 export type GatewayCapabilities = {
@@ -37,6 +51,7 @@ export type GatewayCapabilities = {
   providers: Array<{ id: string; name: string; configured: boolean }>;
   toolsList?: Array<{ name: string; displayName?: string; description: string; source?: string; readOnly?: boolean; timeoutMs?: number; schemaFingerprint?: string }>;
   mcpDetails?: Array<{ id: string; status: "connected" | "error"; error?: string; tools: string[] }>;
+  research?: { provider: string; isMock: boolean; available: boolean; note: string; tools: string[] };
 };
 
 type AnthropicContent =
@@ -140,6 +155,58 @@ const eventToToolCall = (event: { id: string; name: string; args: unknown }): To
   function: { name: event.name, arguments: JSON.stringify(event.args ?? {}) },
 });
 
+const researchToolName = (name: string): boolean => (RESEARCH_TOOL_NAMES as readonly string[]).includes(name);
+
+/**
+ * Agent tool outputs are wrapped in an untrusted-observation envelope. Research
+ * result blocks need the inner JSON payload for the UI, never the envelope.
+ */
+const unwrapUntrustedOutput = (output: string): Record<string, unknown> | undefined => {
+  try {
+    const outer = JSON.parse(output) as unknown;
+    if (outer && typeof outer === "object" && "content" in outer && "trusted" in outer) {
+      const inner = (outer as { content?: unknown }).content;
+      if (typeof inner !== "string") return undefined;
+      const parsed = JSON.parse(inner) as unknown;
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : undefined;
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+};
+
+const researchFetchErrorCode = (code: string): "url_not_accessible" | "url_not_allowed" | "unavailable" => {
+  if (["blocked_host", "blocked_port", "private_address", "credentials_in_url", "unsupported_protocol", "invalid_url", "unsafe_redirect", "robots_disallowed", "too_many_redirects"].includes(code)) {
+    return "url_not_allowed";
+  }
+  if (["timeout", "network_error", "http_error", "fetch_failed", "unsupported_content_type", "response_too_large", "extraction_failed"].includes(code)) {
+    return "url_not_accessible";
+  }
+  return "unavailable";
+};
+
+const publicResearchSource = (source: {
+  id: string; citationIndex: number; title: string; url: string; domain: string; snippet: string;
+  excerpt: string; publishedAt?: string; retrievedAt: string; provider: string; isMock: boolean;
+  status: string; error?: string; score?: number;
+}) => ({
+  sourceId: source.id,
+  citationIndex: source.citationIndex,
+  title: source.title,
+  url: source.url,
+  domain: source.domain,
+  snippet: source.snippet,
+  excerpt: source.excerpt,
+  publishedAt: source.publishedAt ?? null,
+  retrievedAt: source.retrievedAt,
+  provider: source.provider,
+  isMock: source.isMock,
+  status: source.status,
+  error: source.error ?? null,
+  score: source.score ?? null,
+});
+
 const proxy = async (
   req: IncomingMessage,
   res: ServerResponse,
@@ -185,7 +252,15 @@ export const createGateway = async (config: GatewayConfig = {}) => {
   const permissions = new Permissions(
     cfg.policy ?? {
       ...defaultPolicy,
-      rules: [...defaultPolicy.rules, { tool: "knowledge_search", decision: "allow" }],
+      rules: [
+        ...defaultPolicy.rules,
+        { tool: "knowledge_search", decision: "allow" },
+        // Research tools are read-only; their network policy is enforced in code.
+        ...RESEARCH_TOOL_NAMES.map((tool) => ({ tool, decision: "allow" as const })),
+        // Artifacts always require an explicit approval decision in the active run.
+        { tool: "artifact_create", decision: "ask" as const },
+        { tool: "artifact_update", decision: "ask" as const },
+      ],
       default: "deny",
     },
     async () => false,
@@ -194,6 +269,88 @@ export const createGateway = async (config: GatewayConfig = {}) => {
   const fileStorage = new FileStorage(cfg.filesRoot);
   await store.load();
   await store.recoverInterruptedRuns();
+
+  const researchSelection = resolveSearchProvider({
+    provider: cfg.research?.provider,
+    apiKey: cfg.research?.apiKey,
+    maxResults: cfg.research?.maxResults,
+  });
+  const researchLimits = {
+    ...defaultResearchLimits,
+    ...(cfg.research?.maxResults ? { maxResultsPerQuery: cfg.research.maxResults } : {}),
+    ...(cfg.research?.maxPages ? { maxPages: cfg.research.maxPages } : {}),
+  };
+  const researchFetcher = new PageFetcher({
+    respectRobots: cfg.research?.respectRobots ?? !researchSelection.provider.isMock,
+    limits: researchLimits,
+  });
+  const researchStore = {
+    saveSource: (record: Parameters<WorkspaceStore["saveResearchSource"]>[0]) => store.saveResearchSource(record),
+    listSources: (owner: string, conversationId: string) => store.listResearchSources(owner, conversationId),
+    getSource: (id: string, owner: string) => store.getResearchSource(id, owner),
+  };
+  const createResearchEngine = (onActivity?: (activity: ResearchActivity) => void) =>
+    new ResearchEngine({
+      provider: researchSelection.provider,
+      fetcher: researchFetcher,
+      store: researchStore,
+      limits: researchLimits,
+      onActivity,
+    });
+  const createResearchTools = (context: ResearchRunContext, onActivity?: (activity: ResearchActivity) => void) => {
+    void context;
+    return new ResearchTools(createResearchEngine(onActivity), { maxCallsPerRun: 24 });
+  };
+
+  const createArtifactExecutor = (scope: { owner: string; conversationId: string; projectId?: string }) =>
+    async (name: string, args: Record<string, unknown>, callId: string): Promise<string> => {
+      const existing = (await store.listArtifacts(scope.owner, { conversationId: scope.conversationId }))
+        .find((artifact) => artifact.metadata.executionId === callId);
+      if (existing) return JSON.stringify({ artifactId: existing.id, version: existing.currentVersion, name: existing.name, reused: true });
+      const rawSourceIds = Array.isArray(args.sourceIds) ? args.sourceIds.filter((id): id is string => typeof id === "string") : [];
+      if (rawSourceIds.length > 50) throw new Error("Too many source references");
+      if (rawSourceIds.length) {
+        const known = new Set((await store.listResearchSources(scope.owner, scope.conversationId)).map((source) => source.id));
+        const unknown = [...new Set(rawSourceIds)].filter((id) => !known.has(id));
+        if (unknown.length) throw new Error("Artifact references research sources that are not in this conversation");
+      }
+      const sourceIds = [...new Set(rawSourceIds)];
+      const kindNames = ["markdown", "code", "html", "mermaid", "json", "data", "text"];
+      if (name === "artifact_create") {
+        const kind = kindNames.includes(String(args.kind)) ? String(args.kind) as ArtifactKind : "text";
+        const artifact = await store.createArtifact({
+          owner: scope.owner,
+          conversationId: scope.conversationId,
+          projectId: scope.projectId,
+          name: String(args.name),
+          kind,
+          language: typeof args.language === "string" ? args.language : undefined,
+          mimeType: kind === "html" ? "text/html" : kind === "markdown" ? "text/markdown" : kind === "json" || kind === "data" ? "application/json" : "text/plain",
+          metadata: { executionId: callId, ...(sourceIds.length ? { sourceIds } : {}) },
+          content: String(args.content),
+          createdBy: "assistant",
+          changeSummary: "Created by assistant",
+          sourceIds,
+        });
+        return JSON.stringify({ artifactId: artifact.id, version: artifact.currentVersion, name: artifact.name, sourceIds });
+      }
+      if (name === "artifact_update") {
+        const artifact = await store.getArtifact(String(args.artifactId), scope.owner);
+        if (!artifact || (artifact.conversationId !== scope.conversationId && artifact.projectId !== scope.projectId)) {
+          throw new Error("Artifact is not accessible in this conversation or project");
+        }
+        const updated = await store.updateArtifact(artifact.id, scope.owner, {
+          content: String(args.content),
+          createdBy: "assistant",
+          changeSummary: "Updated by assistant",
+          sourceIds,
+        });
+        if (!updated) throw new Error("Artifact not found");
+        return JSON.stringify({ artifactId: updated.id, version: updated.currentVersion, name: updated.name, sourceIds });
+      }
+      throw new Error(`Unsupported artifact operation: ${name}`);
+    };
+
   const activeRuns = new Map<string, AbortController>();
   const approvalResolvers = new Map<string, (approved: boolean) => void>();
   const resumeWorkers = new Map<string, Promise<void>>();
@@ -218,15 +375,18 @@ export const createGateway = async (config: GatewayConfig = {}) => {
           await store.updateRun(runId, { status: "paused", error: "Checkpoint has no resumable operation." });
           return;
         }
+        const pendingIsResearch = researchToolName(pending.function.name);
         const approvalId = checkpoint.approvalIds[0];
         const approval = approvalId ? await store.getApproval(approvalId, owner) : undefined;
-        if (!approval || approval.status === "pending") {
-          await store.updateRun(runId, { status: "awaiting_approval" });
-          return;
-        }
-        if (approval.status !== "approved") {
-          await store.updateRun(runId, { status: "failed", error: `Approval ${approval.status}.` });
-          return;
+        if (!pendingIsResearch) {
+          if (!approval || approval.status === "pending") {
+            await store.updateRun(runId, { status: "awaiting_approval" });
+            return;
+          }
+          if (approval.status !== "approved") {
+            await store.updateRun(runId, { status: "failed", error: `Approval ${approval.status}.` });
+            return;
+          }
         }
         const config = checkpoint.agentConfig;
         const controller = new AbortController();
@@ -235,7 +395,7 @@ export const createGateway = async (config: GatewayConfig = {}) => {
         const projectId = typeof config.projectId === "string" ? config.projectId : undefined;
         const enabledConnectorIds = new Set(Array.isArray(config.enabledConnectors) ? config.enabledConnectors.filter((value): value is string => typeof value === "string") : []);
         const agent = new Agent({
-          client: createProvider(checkpoint.providerId, {
+          client: cfg.modelProvider ?? createProvider(checkpoint.providerId, {
             apiKey: upstreamKey ?? "",
             baseUrl: upstream,
             model: checkpoint.modelId,
@@ -258,34 +418,13 @@ export const createGateway = async (config: GatewayConfig = {}) => {
             if (!credential) throw new Error("Connector credential is unavailable");
             return executeConnectorOperation(name, args, { connectorId, owner, config: integration.config, credential: decryptCredential(credential.encrypted, process.env.CREDENTIAL_ENCRYPTION_KEY ?? "") });
           },
-          artifactExecute: async (name, args, callId) => {
-            const existing = (await store.listArtifacts(owner, { conversationId })).find((artifact) => artifact.metadata.executionId === callId);
-            if (existing) return JSON.stringify({ artifactId: existing.id, version: existing.currentVersion, name: existing.name, reused: true });
-            if (name === "artifact_create") {
-              const kind = ["markdown", "code", "html", "mermaid", "json", "data", "text"].includes(String(args.kind)) ? String(args.kind) as ArtifactKind : "text";
-              const artifact = await store.createArtifact({
-                owner, conversationId, projectId,
-                name: String(args.name),
-                kind,
-                language: typeof args.language === "string" ? args.language : undefined,
-                mimeType: kind === "html" ? "text/html" : kind === "markdown" ? "text/markdown" : kind === "json" || kind === "data" ? "application/json" : "text/plain",
-                metadata: { executionId: callId },
-                content: String(args.content),
-                createdBy: "assistant",
-                changeSummary: "Created by assistant",
-              });
-              return JSON.stringify({ artifactId: artifact.id, version: artifact.currentVersion, name: artifact.name });
-            }
-            if (name === "artifact_update") {
-              const artifact = await store.getArtifact(String(args.artifactId), owner);
-              if (!artifact || (artifact.conversationId !== conversationId && artifact.projectId !== projectId)) throw new Error("Artifact is not accessible in this conversation or project");
-              const updated = await store.updateArtifact(artifact.id, owner, { content: String(args.content), createdBy: "assistant", changeSummary: "Updated by assistant" });
-              if (!updated) throw new Error("Artifact not found");
-              return JSON.stringify({ artifactId: updated.id, version: updated.currentVersion, name: updated.name });
-            }
-            throw new Error(`Unsupported artifact operation: ${name}`);
-          },
-          allowedTools: new Set(Array.isArray(config.allowedTools) ? config.allowedTools.filter((value): value is string => typeof value === "string") : []),
+          artifactExecute: createArtifactExecutor({ owner, conversationId, projectId }),
+          researchExecute: async (name, args, _callId, signal) =>
+            createResearchTools({ owner, conversationId, runId, signal: controller.signal })
+              .execute(name, args, { owner, conversationId, runId, signal: signal ?? controller.signal }),
+          allowedTools: Array.isArray(config.allowedTools) && config.allowedTools.length
+            ? new Set(config.allowedTools.filter((value): value is string => typeof value === "string"))
+            : undefined,
           projectInstructions: projectId ? (await store.getProject(projectId, owner))?.instructions : undefined,
           knowledgeSearch: async (query) => {
             const chunks = await store.searchKnowledge(owner, query, projectId, 8);
@@ -319,7 +458,7 @@ export const createGateway = async (config: GatewayConfig = {}) => {
             return { approvalId: nextApprovalId, expiresAt, wait };
           },
         });
-        const executionId = approval.toolExecutionId;
+        const executionId = approval?.toolExecutionId ?? `${runId}:${pending.id}`;
         const journal = await store.getToolExecution(executionId);
         let output = journal?.output;
         if (journal?.status === "ambiguous") {
@@ -329,10 +468,10 @@ export const createGateway = async (config: GatewayConfig = {}) => {
         if (journal?.status !== "completed") {
           await store.updateRun(runId, { status: "running" });
           await store.appendEvent(runId, run.conversationId, "run.tool_ready", { id: pending.id, name: pending.function.name });
-          await store.updateApproval(approval.id, owner, { status: "executing", executionStatus: "started" });
+          if (approval) await store.updateApproval(approval.id, owner, { status: "executing", executionStatus: "started" });
           output = await agent.executeApprovedCall(pending, controller.signal);
           await store.finishToolExecution(executionId, { status: "completed", output });
-          await store.updateApproval(approval.id, owner, { status: "completed", executionStatus: "completed", result: output });
+          if (approval) await store.updateApproval(approval.id, owner, { status: "completed", executionStatus: "completed", result: output });
         }
         await store.createCheckpoint({
           runId,
@@ -347,7 +486,7 @@ export const createGateway = async (config: GatewayConfig = {}) => {
           pendingToolCalls: [],
           completedToolExecutionIds: [executionId],
           toolResults: { [pending.id]: output ?? "" },
-          approvalIds: [approval.id],
+          approvalIds: approval ? [approval.id] : [],
           context: {},
         });
         for await (const event of agent.resumeAfterTool(pending, output ?? "", controller.signal)) {
@@ -363,6 +502,22 @@ export const createGateway = async (config: GatewayConfig = {}) => {
             await store.finishToolExecution(id, { status: "completed", output: event.output });
           }
         }
+        await store.createCheckpoint({
+          runId,
+          conversationId,
+          owner,
+          phase: "completed",
+          agentConfig: checkpoint.agentConfig,
+          providerId: checkpoint.providerId,
+          modelId: checkpoint.modelId,
+          modelParameters: checkpoint.modelParameters,
+          messages: agent.messages.slice(),
+          pendingToolCalls: [],
+          completedToolExecutionIds: [executionId],
+          toolResults: { [pending.id]: output ?? "" },
+          approvalIds: approval ? [approval.id] : [],
+          context: {},
+        });
         await store.updateRun(runId, { status: "completed" });
         await store.appendEvent(runId, run.conversationId, "run.completed", {});
       } catch (error) {
@@ -411,6 +566,13 @@ export const createGateway = async (config: GatewayConfig = {}) => {
           readOnly: tool.readOnly, timeoutMs: tool.timeoutMs, schemaFingerprint: tool.schemaFingerprint,
         })),
         mcpDetails: mcp.serverDetails(),
+        research: {
+          provider: researchSelection.provider.id,
+          isMock: researchSelection.provider.isMock,
+          available: researchSelection.provider.status().available,
+          note: researchSelection.note,
+          tools: [...RESEARCH_TOOL_NAMES],
+        },
       };
       json(res, 200, capabilities);
       return;
@@ -589,6 +751,98 @@ export const createGateway = async (config: GatewayConfig = {}) => {
     if (artifactMatch && req.method === "DELETE") {
       const deleted = await store.deleteArtifact(artifactMatch[1], owner);
       json(res, deleted ? 200 : 404, deleted ? { ok: true } : { error: { message: "Artifact not found" } });
+      return;
+    }
+
+    if (requestUrl.pathname === "/research/status" && req.method === "GET") {
+      const status = researchSelection.provider.status();
+      json(res, 200, {
+        provider: status.id,
+        displayName: status.displayName,
+        available: status.available,
+        isMock: status.isMock,
+        requiresCredentials: status.requiresCredentials,
+        note: researchSelection.note,
+        degraded: researchSelection.degraded,
+        limits: { ...status.limits, maxPages: researchLimits.maxPages, maxSourceChars: researchLimits.maxSourceChars },
+        providers: researchSelection.statuses,
+        tools: [...RESEARCH_TOOL_NAMES],
+        security: {
+          allowedProtocols: ["http:", "https:"],
+          allowedPorts: [80, 443],
+          blocksPrivateAddresses: true,
+          pinsDnsAnswers: true,
+          revalidatesRedirects: true,
+          maxResponseBytes: researchLimits.maxResponseBytes,
+          fetchTimeoutMs: researchLimits.fetchTimeoutMs,
+          executesPageScripts: false,
+          respectsRobotsTxt: !status.isMock,
+        },
+      });
+      return;
+    }
+    if (requestUrl.pathname === "/research/sources" && req.method === "GET") {
+      const conversationId = requestUrl.searchParams.get("conversationId");
+      if (!conversationId) {
+        json(res, 400, { error: { message: "conversationId is required" } });
+        return;
+      }
+      const sources = await store.listResearchSources(owner, conversationId);
+      json(res, 200, { conversationId, sources: sources.map(publicResearchSource) });
+      return;
+    }
+    const researchSourceMatch = requestUrl.pathname.match(/^\/research\/sources\/([^/]+)$/);
+    if (researchSourceMatch && req.method === "GET") {
+      const source = await store.getResearchSource(decodeURIComponent(researchSourceMatch[1]), owner);
+      json(res, source ? 200 : 404, source
+        ? { source: { ...publicResearchSource(source), content: source.content, metadata: source.metadata, runId: source.runId ?? null } }
+        : { error: { message: "Research source not found" } });
+      return;
+    }
+    if (requestUrl.pathname === "/research/search" && req.method === "POST") {
+      try {
+        const body = JSON.parse((await readLimitedBody(req, cfg.maxRequestBytes ?? 2_000_000)).toString("utf8")) as Record<string, unknown>;
+        if (typeof body.query !== "string" || !body.query.trim()) throw new Error("query is required");
+        if (typeof body.conversationId !== "string" || !body.conversationId) throw new Error("conversationId is required");
+        const engine = createResearchEngine();
+        const outcome = await engine.search(body.query, { owner, conversationId: body.conversationId });
+        json(res, 200, {
+          provider: outcome.page.provider,
+          isMock: outcome.page.isMock,
+          query: body.query,
+          hasMore: outcome.page.hasMore,
+          nextPage: outcome.page.nextPage ?? null,
+          sources: outcome.sources.map(publicResearchSource),
+        });
+      } catch (error) {
+        const status = error instanceof Error && "code" in error && (error as { code?: string }).code === "provider_unavailable" ? 503 : 400;
+        json(res, status, { error: { message: error instanceof Error ? error.message : String(error), code: (error as { code?: string }).code ?? "invalid_request" } });
+      }
+      return;
+    }
+    if (requestUrl.pathname === "/research/run" && req.method === "POST") {
+      try {
+        const body = JSON.parse((await readLimitedBody(req, cfg.maxRequestBytes ?? 2_000_000)).toString("utf8")) as Record<string, unknown>;
+        if (typeof body.question !== "string" || !body.question.trim()) throw new Error("question is required");
+        if (typeof body.conversationId !== "string" || !body.conversationId) throw new Error("conversationId is required");
+        const engine = createResearchEngine();
+        const result = await engine.runWorkflow(body.question, { owner, conversationId: body.conversationId });
+        json(res, 200, {
+          question: result.question,
+          queries: result.queries,
+          provider: result.provider,
+          isMock: result.isMock,
+          findings: result.findings,
+          conflicts: result.conflicts,
+          brief: result.brief,
+          pagesFetched: result.pagesFetched,
+          errors: result.errors,
+          sources: result.sources.map(publicResearchSource),
+        });
+      } catch (error) {
+        const status = error instanceof Error && "code" in error && (error as { code?: string }).code === "provider_unavailable" ? 503 : 400;
+        json(res, status, { error: { message: error instanceof Error ? error.message : String(error), code: (error as { code?: string }).code ?? "invalid_request" } });
+      }
       return;
     }
     if (requestUrl.pathname === "/connectors" && req.method === "GET") {
@@ -1127,8 +1381,10 @@ export const createGateway = async (config: GatewayConfig = {}) => {
       model: effectiveModel,
     });
     activeRuns.set(run.id, controller);
+    const runProjectId = header(req.headers, "x-deepseek-ui-project") ?? undefined;
+    const researchTools = createResearchTools({ owner, conversationId, runId: run.id, signal: controller.signal });
     const agent = new Agent({
-      client: createProvider(effectiveProvider, {
+      client: cfg.modelProvider ?? createProvider(effectiveProvider, {
         apiKey: apiKey ?? "",
         baseUrl: upstream,
         model: process.env.DEEPSEEK_MODEL ?? effectiveModel,
@@ -1156,6 +1412,9 @@ export const createGateway = async (config: GatewayConfig = {}) => {
         return executeConnectorOperation(name, args, { connectorId, owner, config: integration.config, credential: decryptCredential(credential.encrypted, process.env.CREDENTIAL_ENCRYPTION_KEY ?? "") });
       },
       maxContextChars: 120_000,
+      artifactExecute: createArtifactExecutor({ owner, conversationId, projectId: runProjectId }),
+      researchExecute: async (name, args, _callId, signal) =>
+        researchTools.execute(name, args, { owner, conversationId, runId: run.id, signal: signal ?? controller.signal }),
       projectInstructions: (await store.getProject(header(req.headers, "x-deepseek-ui-project") ?? "", owner))?.instructions,
       knowledgeSearch: async (query) => {
         const projectId = header(req.headers, "x-deepseek-ui-project") ?? undefined;
@@ -1272,6 +1531,102 @@ export const createGateway = async (config: GatewayConfig = {}) => {
       return next;
     };
 
+    /**
+     * Research tool traffic is rendered with standard Anthropic web-search /
+     * web-fetch blocks so the existing activity panel, citation chips, and
+     * source panel work without a parallel UI state store. Every block is
+     * opened and closed atomically.
+     */
+    const writeBlock = (contentBlock: Record<string, unknown>) => {
+      const blockIndex = index++;
+      writeEvent(res, "content_block_start", { type: "content_block_start", index: blockIndex, content_block: contentBlock });
+      writeEvent(res, "content_block_stop", { type: "content_block_stop", index: blockIndex });
+    };
+    const emitResearchStart = (name: string, id: string, args: Record<string, unknown>) => {
+      if (name === "web_search") {
+        writeBlock({
+          type: "server_tool_use",
+          id,
+          name: "deepseek_web_search",
+          input: { action: "search", queries: [typeof args.query === "string" ? args.query : ""] },
+          caller: { type: "direct" },
+          kind: "search",
+          provider: researchSelection.provider.id,
+          isMock: researchSelection.provider.isMock,
+        });
+      } else if (name === "web_fetch" || name === "web_extract") {
+        writeBlock({
+          type: "server_tool_use",
+          id,
+          name: "deepseek_read_url",
+          input: { action: "read_link", url: typeof args.url === "string" ? args.url : "" },
+          caller: { type: "direct" },
+          kind: "read_link",
+          provider: researchSelection.provider.id,
+          isMock: researchSelection.provider.isMock,
+        });
+      }
+    };
+    const emitResearchResult = (name: string, id: string, output: string) => {
+      const parsed = unwrapUntrustedOutput(output);
+      if (name === "web_search") {
+        const results = Array.isArray(parsed?.results) ? parsed.results as Array<Record<string, unknown>> : [];
+        const content = parsed?.ok === true
+          ? results.map((result) => ({
+              type: "web_search_result",
+              title: String(result.title ?? ""),
+              url: String(result.url ?? ""),
+              snippet: String(result.snippet ?? ""),
+              site_icon: null,
+              site_name: String(result.domain ?? ""),
+              page_age: typeof result.publishedAt === "string" ? result.publishedAt : null,
+              encrypted_content: "",
+              provider: parsed.provider,
+              is_mock: Boolean(parsed.isMock),
+              retrieved_at: result.retrievedAt,
+              source_id: result.sourceId,
+              citation_index: result.citationIndex,
+            }))
+          : [{ type: "web_search_tool_result_error", error_code: "unavailable" }];
+        writeBlock({ type: "web_search_tool_result", tool_use_id: id, content, kind: "search" });
+        return;
+      }
+      if (name === "web_fetch" || name === "web_extract") {
+        if (parsed?.ok === true) {
+          writeBlock({
+            type: "web_fetch_tool_result",
+            tool_use_id: id,
+            kind: "read_link",
+            content: {
+              type: "web_fetch_result",
+              url: String(parsed.url ?? ""),
+              content: {
+                type: "document",
+                source: {
+                  type: "text",
+                  media_type: "text/plain",
+                  data: String(parsed.content ?? parsed.focusedText ?? "").slice(0, 4000),
+                },
+                title: typeof parsed.title === "string" ? parsed.title : null,
+              },
+              published_at: typeof parsed.publishedAt === "string" ? parsed.publishedAt : null,
+              extraction: parsed.extraction,
+              provider: parsed.provider,
+              is_mock: Boolean(parsed.isMock),
+              retrieved_at: parsed.retrievedAt,
+              source_id: parsed.sourceId,
+              citation_index: parsed.citationIndex,
+            },
+          });
+        } else {
+          const code = parsed?.error && typeof parsed.error === "object"
+            ? String((parsed.error as Record<string, unknown>).code ?? "")
+            : "";
+          writeBlock({ type: "web_fetch_tool_result", tool_use_id: id, kind: "read_link", content: { type: "web_fetch_tool_result_error", error_code: researchFetchErrorCode(code) } });
+        }
+      }
+    };
+
     try {
       for await (const event of agent.run(prompt, controller.signal)) {
         const eventPayload =
@@ -1299,13 +1654,17 @@ export const createGateway = async (config: GatewayConfig = {}) => {
             argumentsHash: createHash("sha256").update(JSON.stringify(event.args)).digest("hex"),
           });
           await persistCheckpoint("tool_proposed", { pendingToolCalls: [eventToToolCall(event)] });
-          const toolIndex = index++;
-          toolIndexes.set(event.id, toolIndex);
-          writeEvent(res, "content_block_start", {
-            type: "content_block_start",
-            index: toolIndex,
-            content_block: { type: "tool_use", id: event.id, name: event.name, input: event.args },
-          });
+          if (researchToolName(event.name)) {
+            emitResearchStart(event.name, event.id, (event.args ?? {}) as Record<string, unknown>);
+          } else {
+            const toolIndex = index++;
+            toolIndexes.set(event.id, toolIndex);
+            writeEvent(res, "content_block_start", {
+              type: "content_block_start",
+              index: toolIndex,
+              content_block: { type: "tool_use", id: event.id, name: event.name, input: event.args },
+            });
+          }
         } else if (event.type === "approval_required") {
           await store.updateRun(run.id, { status: "awaiting_approval" });
           await persistCheckpoint("awaiting_approval", {
@@ -1323,6 +1682,10 @@ export const createGateway = async (config: GatewayConfig = {}) => {
           const toolIndex = toolIndexes.get(event.id);
           if (toolIndex !== undefined) {
             writeEvent(res, "content_block_stop", { type: "content_block_stop", index: toolIndex });
+          }
+          if (researchToolName(event.name)) {
+            emitResearchResult(event.name, event.id, event.output);
+            continue;
           }
           writeEvent(res, "content_block_delta", {
             type: "content_block_delta",
