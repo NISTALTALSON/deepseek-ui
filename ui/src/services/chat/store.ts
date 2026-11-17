@@ -5,6 +5,7 @@ import type { ChatModel, CreateMessageRequest } from '../api/types.js'
 import { extractFileIds, getFileErrorCode, isRetryableApiError } from '../api/errors.js'
 import { cancelUpload, describeUploadError, uploadAttachment, useUploads } from '../attachments.js'
 import { useSettings } from '../settings.js'
+import { useWorkspace } from '../workspace.js'
 import { appendBranch, getVisibleMessages, normalizeSession, selectVersion } from './branches.js'
 import * as db from './db.js'
 import {
@@ -103,7 +104,12 @@ const getStreamController = (id: string) => {
 }
 
 const sameSummary = (a: SessionSummary, b: SessionSummary) =>
-  a.title === b.title && a.createdAt === b.createdAt && a.updatedAt === b.updatedAt
+  a.title === b.title &&
+  a.createdAt === b.createdAt &&
+  a.updatedAt === b.updatedAt &&
+  a.pinned === b.pinned &&
+  a.archived === b.archived &&
+  a.folder === b.folder
 
 const sessionAccess = new Map<string, number>()
 const unsavedSessions = new Set<string>()
@@ -255,12 +261,12 @@ export const bindChatPersistence = () => {
 
 /** 按当前开关创建回复：深度思考对应 thinking，智能搜索控制 deepseek_web_search。 */
 const createReply = (): AssistantMessage => {
-  const { thinking, search } = useSettings.getState()
+  const { thinking, search, model } = useSettings.getState()
   return {
     id: createId(),
     role: 'assistant',
     createdAt: Date.now(),
-    model: MODEL,
+    model: useWorkspace.getState().model ?? model,
     thinking,
     search,
     prefix: true,
@@ -487,6 +493,32 @@ export const removeSession = (id: string): Promise<boolean> => {
   return task
 }
 
+const updateSessionMetadata = async (
+  id: string,
+  metadata: Pick<Session, 'pinned' | 'archived' | 'folder'>
+) => {
+  try {
+    await db.updateSessionMetadata(id, metadata)
+    updateSession(id, (session) => ({ ...session, ...metadata }))
+    set((state) => ({
+      sessions: state.sessions.map((summary) =>
+        summary.id === id ? { ...summary, ...metadata } : summary
+      ),
+    }))
+    return true
+  } catch {
+    return false
+  }
+}
+
+export const togglePinned = async (id: string, pinned: boolean) => {
+  return updateSessionMetadata(id, { pinned })
+}
+
+export const toggleArchived = async (id: string, archived: boolean) => {
+  return updateSessionMetadata(id, { archived })
+}
+
 const removeSessionData = async (id: string): Promise<boolean> => {
   if (get().importingHistory || deletingSessions.has(id)) {
     return false
@@ -709,7 +741,7 @@ export const continueReply = (sessionId: string, messageId: string) => {
   const reply: AssistantMessage = {
     ...previous,
     // 未记录请求配置的回复，续写时使用默认模型和当前开关。
-    model: previous.model ?? MODEL,
+    model: previous.model ?? useSettings.getState().model ?? MODEL,
     thinking: previous.thinking ?? thinking,
     search: previous.search ?? search,
     status: 'pending',
@@ -1000,14 +1032,33 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
           useSettings.getState().apiKey ?? '',
           {
             model: initial.model ?? MODEL,
-            system: SYSTEM_PROMPT,
+            system: [
+              SYSTEM_PROMPT,
+              `Enabled skills: ${useWorkspace.getState().enabledSkills.join(', ') || 'none'}.`,
+              `Enabled integrations: ${useWorkspace
+                .getState()
+                .integrations.filter((item) => item.enabled)
+                .map((item) => item.name)
+                .join(', ') || 'none'}.`,
+            ].join('\n'),
             messages,
             thinking: { type: initial.thinking ? 'enabled' : 'disabled' },
             safety_check: SAFETY_CHECK,
             tools: serverTools(initial.search ?? false),
             ...(titleRequests.has(controller) ? { title: { enabled: true } } : {}),
           },
-          controller.signal
+          controller.signal,
+          {
+            'x-deepseek-ui-conversation': sessionId,
+            'x-deepseek-ui-workspace': 'local',
+            'x-deepseek-ui-skills': useWorkspace.getState().enabledSkills.join(','),
+            'x-deepseek-ui-integrations': useWorkspace
+              .getState()
+              .integrations.filter((item) => item.enabled)
+              .map((item) => item.id)
+              .join(','),
+            'x-deepseek-ui-provider': (initial.model ?? MODEL) === 'mock' ? 'mock' : 'deepseek',
+          }
         )
         const blockIndexes = new Map<number, number>()
         for await (const event of events) {

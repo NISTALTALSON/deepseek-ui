@@ -21,9 +21,19 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
   const sessions = useChatStore((state) => state.sessions)
   const activeId = useChatStore((state) => state.activeId)
   const [now, setNow] = useState(Date.now)
-  const groups = useMemo(() => groupSessions(sessions, now, t), [sessions, now, t])
   const [deleting, setDeleting] = useState<SessionSummary | null>(null)
   const [deletePending, setDeletePending] = useState(false)
+  const [query, setQuery] = useState('')
+  const visibleSessions = useMemo(() => {
+    const normalized = query.trim().toLowerCase()
+    return sessions.filter((session) => {
+      if (session.archived) {
+        return false
+      }
+      return !normalized || session.title.toLowerCase().includes(normalized)
+    })
+  }, [query, sessions])
+  const visibleGroups = useMemo(() => groupSessions(visibleSessions, now, t), [now, t, visibleSessions])
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>
@@ -74,9 +84,26 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
         </span>
         {t('newChat')}
       </button>
+      <label className={styles.search}>
+        <span className={styles.searchIcon}>⌕</span>
+        <input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Search conversations"
+          aria-label="Search conversations"
+        />
+      </label>
       <div className={styles.listWrap}>
         <div className={styles.list}>
-          {groups.map((group) => (
+          {sessions.some((session) => session.pinned && !session.archived) ? (
+            <div className={styles.section}>
+              <div className={styles.sectionHeader}>Pinned</div>
+              {visibleSessions.filter((session) => session.pinned).map((session) => (
+                <SessionItem key={session.id} session={session} active={session.id === activeId} onDelete={() => setDeleting(session)} />
+              ))}
+            </div>
+          ) : null}
+          {visibleGroups.map((group) => (
             <div key={group.key} className={styles.section}>
               <div className={styles.sectionHeader}>{group.label}</div>
               {group.sessions.map((session) => (
@@ -87,6 +114,7 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
                   onDelete={() => setDeleting(session)}
                 />
               ))}
+              {visibleSessions.length === 0 ? <div className={styles.empty}>No conversations found.</div> : null}
             </div>
           ))}
         </div>
