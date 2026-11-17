@@ -48,6 +48,11 @@ the gateway is the security and execution boundary.
 - Workspace presentation boundary: `ui/src/components/sider` owns search,
   pinning, and archive navigation, while `ActivityPanel` renders only
   structured tool/source blocks received from the gateway stream.
+- Project and knowledge boundary: `src/persistence.ts` stores owner-scoped
+  projects, file metadata, extraction state, and knowledge chunks;
+  `src/knowledge.ts` owns safe local storage, extraction, chunking, and
+  keyword retrieval. The gateway exposes project/file/knowledge APIs and
+  injects only the selected project's instructions and retrieved evidence.
 
 ## Known gaps
 
@@ -70,8 +75,10 @@ the gateway is the security and execution boundary.
 - MCP transport is currently stdio-based. Remote Streamable HTTP and OAuth
   need a separate credential-safe transport layer.
 - Artifacts, long-term memory, project files, and evaluation scenarios need
-  persistent domain models and APIs before their UI surfaces should claim to
-  support them.
+  richer persistent domain models and APIs before their UI surfaces should
+  claim to support them. Projects, uploaded files, extraction, keyword search,
+  source links, and project-scoped conversations are now implemented; vector
+  embeddings, reranking, and object-storage backends remain future work.
 
 ## Implementation order
 

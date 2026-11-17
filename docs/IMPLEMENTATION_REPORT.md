@@ -65,6 +65,22 @@ counts, source details, and current generation status from the gateway stream.
 independent server-backed records in the panel. The existing message stream
 remains authoritative for the visible activity cards.
 
+### Projects, files, and knowledge workspace
+
+**Implemented:** Owner-scoped project CRUD, project instructions, archive/delete,
+project conversation history, safe local file storage, upload validation,
+multi-file and drag-and-drop project uploads, extraction status, PDF/DOCX/text/
+JSON/CSV/source-code extraction, chunking, keyword retrieval, project-scoped
+knowledge search, source links, file preview/download/delete, and gateway
+authorization checks. Project instructions are injected into the agent system
+context, and the `knowledge_search` tool retrieves bounded untrusted evidence
+for the active project. Vector search and reranking are intentionally not
+claimed when no embedding provider is configured; keyword search is the real
+fallback.
+
+**Files:** `src/knowledge.ts`, `src/persistence.ts`, `src/gateway.ts`,
+`ui/src/services/projects.ts`, `ui/src/components/projects/`.
+
 ### Milestone 4 — providers
 
 **Completed:** `ModelProvider` is now the agent dependency. DeepSeek and the
@@ -80,14 +96,14 @@ are not implemented.
 context compaction, structured tool-use blocks, usage reporting, retries,
 bounded observations, and gateway health/capability discovery.
 
-**Not yet complete:** relational projects/files/knowledge retrieval, agent
+**Not yet complete:** relational project storage, agent
 builder, connector OAuth, remote HTTP MCP, durable approval/resume, artifact
 versions, web research, user/project/agent memory controls, evaluation
 scenarios, cost dashboards, OpenTelemetry export, and a production auth layer.
 
 ## Validation results
 
-- Root tests: **15 passed, 0 failed**
+- Root tests: **18 passed, 0 failed**
 - Root TypeScript type-check: **passed**
 - UI TypeScript type-check: **passed**
 - UI lint: **0 warnings, 0 errors**
@@ -99,6 +115,8 @@ scenarios, cost dashboards, OpenTelemetry export, and a production auth layer.
   returned `run.started`, `run.text`, `run.done`, and `run.completed`.
 - Restart/replay smoke test: an active persisted run was restored as `paused`
   and its event journal replayed over SSE with event IDs.
+- Projects/files integration: project creation, upload, extraction completion,
+  keyword retrieval, source links, and unauthorized file access are covered.
 
 ## Configuration and external dependencies
 
@@ -120,6 +138,7 @@ requests. Browser reopen now queries the durable run list for the loaded
 conversation and converts paused, failed, or cancelled in-flight messages into
 explicit recoverable error/stopped states without retrying side effects. The
 activity panel currently reflects structured stream blocks rather than
-independently replaying run events after a full browser refresh. Remote MCP/OAuth, connector secrets,
-artifact/file/project APIs, additional provider adapters, and evaluation
-benchmarks are still required for the full production vision.
+independently replaying run events after a full browser refresh. Remote MCP/OAuth,
+connector secrets, large-scale object storage, OCR for scanned PDFs/images,
+vector embeddings, reranking, and richer page-level previews are still required
+for the full production vision.

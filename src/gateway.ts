@@ -171,8 +171,12 @@ export const createGateway = async (config: GatewayConfig = {}) => {
   const skills = new SkillRegistry();
   await skills.scan(cfg.skills ?? ["./skills"]);
   const permissions = new Permissions(
-    cfg.policy ?? { ...defaultPolicy, default: "deny" },
-    async () => false
+    cfg.policy ?? {
+      ...defaultPolicy,
+      rules: [...defaultPolicy.rules, { tool: "knowledge_search", decision: "allow" }],
+      default: "deny",
+    },
+    async () => false,
   );
   const store = new WorkspaceStore(cfg.dataFile);
   const fileStorage = new FileStorage(cfg.filesRoot);

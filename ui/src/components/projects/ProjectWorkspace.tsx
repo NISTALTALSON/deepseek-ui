@@ -47,6 +47,11 @@ export const ProjectWorkspace = ({ open, onClose }: { open: boolean; onClose: ()
     return null
   }
   const visible = projects.filter((item) => !item.archived && item.name.toLowerCase().includes(search.toLowerCase()))
+  const uploadFiles = (selected: File[]) => {
+    if (!project || selected.length === 0) { return }
+    setBusy(true)
+    void Promise.all(selected.map((file) => uploadProjectFile(project.id, file))).finally(() => setBusy(false))
+  }
   const save = async () => {
     setBusy(true)
     try {
@@ -98,10 +103,20 @@ export const ProjectWorkspace = ({ open, onClose }: { open: boolean; onClose: ()
                 {conversations.map((conversation) => <button type="button" className={styles.conversation} key={conversation.id} onClick={() => { selectSession(conversation.id); onClose() }}>{conversation.title || 'Untitled conversation'}<small>{conversation.model}</small></button>)}
                 {conversations.length === 0 ? <div className={styles.empty}>No conversations in this project yet.</div> : null}
               </div>
-              <div className={styles.filesHeader}><h3>Project files</h3><Button size="s" variant="outlined" onClick={() => inputRef.current?.click()}>Upload files</Button></div>
+              <div
+                className={styles.filesHeader}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => {
+                  event.preventDefault()
+                  uploadFiles(Array.from(event.dataTransfer.files))
+                }}
+              >
+                <div><h3>Project files</h3><small>Drop files here or choose files to upload.</small></div>
+                <Button size="s" variant="outlined" onClick={() => inputRef.current?.click()}>{busy ? 'Uploading…' : 'Upload files'}</Button>
+              </div>
               <input ref={inputRef} hidden type="file" multiple onChange={(event) => {
                 const selected = Array.from(event.target.files ?? [])
-                void Promise.all(selected.map((file) => uploadProjectFile(project.id, file)))
+                uploadFiles(selected)
                 event.target.value = ''
               }} />
               {files.map((file) => (
