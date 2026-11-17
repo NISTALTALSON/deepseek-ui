@@ -138,6 +138,26 @@ test("agent persistence versions updates and isolates owners", async () => {
         await rm(directory, { recursive: true, force: true });
       }
     });
+
+    test("remote MCP rejects private endpoints before connecting", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "deepseek-ui-mcp-ssrf-"));
+      const gateway = await createGateway({
+        provider: "mock",
+        dataFile: join(directory, "workspace.json"),
+        mcp: { servers: { private: { transport: "streamable-http", url: "https://127.0.0.1:8443/mcp" } } },
+      });
+      await new Promise<void>((resolve) => gateway.server.listen(0, "127.0.0.1", resolve));
+      const address = gateway.server.address();
+      const base = `http://127.0.0.1:${typeof address === "object" && address ? address.port : 0}`;
+      try {
+        const body = await (await fetch(`${base}/capabilities`)).json() as { mcpDetails?: Array<{ id: string; status: string; error?: string }> };
+        assert.equal(body.mcpDetails?.find((item) => item.id === "private")?.status, "error");
+        assert.match(body.mcpDetails?.find((item) => item.id === "private")?.error ?? "", /private|local/i);
+      } finally {
+        await gateway.close();
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
     const updated = await store.updateAgent(agent.id, "alice", { description: "Updated" });
     assert.equal(updated?.version, 2);
     assert.equal(updated?.versions.length, 1);

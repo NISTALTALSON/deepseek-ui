@@ -72,10 +72,11 @@ the gateway is the security and execution boundary.
   status without replaying side effects. The visible activity panel currently
   reflects the structured message stream rather than independently rendering
   the full run journal after refresh.
-- MCP transport is currently stdio-based. The current SDK includes Streamable
-  HTTP primitives, but remote connection management, OAuth, SSRF/DNS-rebinding
-  defenses, and credential isolation are intentionally not exposed until they
-  can be implemented as a dedicated secure transport boundary.
+- MCP supports trusted local stdio and explicitly configured Streamable HTTP.
+  Remote URLs must use HTTPS, cannot contain inline credentials, resolve only
+  to public addresses, reject redirects, and receive only that server's
+  configured headers. OAuth lifecycle and interactive credential setup remain
+  future work; no browser credential is forwarded to MCP.
 - Artifacts, long-term memory, project files, and evaluation scenarios need
   richer persistent domain models and APIs before their UI surfaces should
   claim to support them. Projects, uploaded files, extraction, keyword search,

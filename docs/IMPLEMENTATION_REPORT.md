@@ -94,7 +94,7 @@ timeouts, retries, bounded untrusted observations, and policy enforcement.
 
 **Validated:** Agent CRUD/version persistence, owner isolation, selected-agent
 mock execution, UI type-check, UI lint, production build, and the complete
-root suite (20 passing tests).
+root suite (21 passing tests).
 
 **Files:** `src/persistence.ts`, `src/agent.ts`, `src/gateway.ts`,
 `src/mcp.ts`, `src/skills.ts`, `ui/src/services/agents.ts`,
@@ -122,8 +122,7 @@ are not implemented.
 context compaction, structured tool-use blocks, usage reporting, retries,
 bounded observations, and gateway health/capability discovery.
 
-**Not yet complete:** relational project storage, agent
-builder, connector OAuth, remote HTTP MCP, durable approval/resume, artifact
+**Not yet complete:** relational project storage, connector OAuth, durable approval/resume, artifact
 versions, web research, user/project/agent memory controls, evaluation
 scenarios, cost dashboards, OpenTelemetry export, and a production auth layer.
 
@@ -154,6 +153,9 @@ scenarios, cost dashboards, OpenTelemetry export, and a production auth layer.
   `skills`, `mcp`, policy, origin, host, and port settings.
 - Local mock mode requires no API key or external service.
 - MCP servers remain optional and require their own commands/credentials.
+- Remote Streamable HTTP MCP requires explicit HTTPS configuration; private/local
+  DNS targets, URL credentials, and redirects are rejected. OAuth is not yet
+  interactive.
 - The JSON store defaults to `.deepseek-ui/workspace.json`; use `dataFile` to
   place it elsewhere.
 
@@ -167,9 +169,8 @@ requests. Browser reopen now queries the durable run list for the loaded
 conversation and converts paused, failed, or cancelled in-flight messages into
 explicit recoverable error/stopped states without retrying side effects. The
 activity panel currently reflects structured stream blocks rather than
-independently replaying run events after a full browser refresh. Agent skill
-package upload/edit/version management, plugin package execution, remote
-Streamable HTTP MCP/OAuth, connector secrets, large-scale object storage, OCR
+independently replaying run events after a full browser refresh. Plugin package
+execution, MCP OAuth, connector secrets, large-scale object storage, OCR
 for scanned PDFs/images, vector embeddings, reranking, and richer page-level
 previews are still required for the full production vision. The UI deliberately
 does not show unconfigured plugins/connectors as connected integrations.
