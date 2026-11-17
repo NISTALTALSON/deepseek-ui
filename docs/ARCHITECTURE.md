@@ -125,12 +125,48 @@ the gateway is the security and execution boundary.
   source content locally, while HTML is placed in an iframe with an empty
   sandbox and restrictive CSP. Generated HTML/JavaScript is never executed in
   the trusted application origin.
+- Research boundary: `src/research/` implements a provider-independent
+  `SearchProvider` (Tavily live adapter plus a deterministic local fixture
+  provider), a safe fetcher that rejects private/loopback/link-local
+  destinations, pins the validated DNS answer for the socket, revalidates every
+  redirect, bounds size/time, and refuses non-textual responses, and a
+  readability-style extractor that returns plain sanitized text only.
+  `ResearchEngine` performs bounded query generation, de-duplication, page
+  retrieval, relevance ranking, numeric-claim conflict detection, and cited
+  brief synthesis. The gateway registers `web_search`, `web_fetch`,
+  `web_extract`, and `research_sources` as read-only builtin tools through the
+  same permission, journal, checkpoint, and resume path as other tools, and
+  maps their results to `server_tool_use`, `web_search_tool_result`, and
+  `web_fetch_tool_result` blocks so the activity panel, citation chips, and
+  search panel work without a parallel UI store. Each snapshot is persisted as
+  an owner-scoped `ResearchSourceRecord` (URL, canonical URL, domain, title,
+  snippet, extraction, retrieval time, publication date, provider, mock flag,
+  citation index); artifacts may reference those ids and keep them per version.
+  Endpoints: `GET /research/status`, `GET /research/sources`,
+  `GET /research/sources/:id`, `POST /research/search`, `POST /research/run`.
+  Mock results are always labelled as local fixtures in the tool payload, the
+  SSE blocks, and the UI; they are never presented as internet results.
+- Research security boundary: retrieved page text is untrusted evidence. The
+  extractor strips scripts/styles/hidden elements/comments before extraction,
+  and the agent wraps every tool observation in an untrusted envelope. The
+  research system prompt forbids following page instructions or inventing
+  URLs, dates, quotes, and citations. Live retrieval honors a cached
+  robots.txt policy, serializes per-host requests, and never executes page
+  JavaScript.
 - Managed package boundary: user-uploaded `SKILL.md` packages are stored under
   the configured skill root and can be inspected, edited, enabled, and removed
   through the gateway. Skill content is treated as untrusted instructions;
   package scripts are never executed. Plugin, MCP, and connector metadata is
   owner-scoped in the persistence adapter, while actual MCP connectivity still
   comes only from the trusted gateway configuration.
+- Research gaps: only the Tavily adapter and the deterministic local fixture
+  provider are wired. Fetched pages must be HTML/XHTML/plain text; there is no
+  JavaScript rendering, PDF/image extraction, crawl queue, CAPTCHA handling, or
+  embedding reranker. robots.txt is best-effort and extraction is heuristic.
+  Workflow synthesis is extractive (the agent model writes the final answer);
+  research activity for `research_sources` run mode appears after the call
+  completes rather than streaming each internal query. Mock mode never performs
+  internet search and every surface labels it accordingly.
 
 ## Implementation order
 
@@ -139,3 +175,5 @@ the gateway is the security and execution boundary.
 3. Persistent projects, files, artifacts, and memory.
 4. Secure remote MCP and connector credential flows.
 5. Additional provider adapters and evaluation harnesses.
+6. Web research: provider abstraction, SSRF-safe retrieval, cited answers,
+   research activity, and research artifacts (implemented).
