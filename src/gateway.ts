@@ -559,6 +559,10 @@ export const createGateway = async (config: GatewayConfig = {}) => {
     }
     const effectiveProvider = selectedAgent?.provider ?? provider;
     const effectiveModel = selectedAgent?.model ?? input.model ?? cfg.model ?? "deepseek-flash";
+    if (effectiveProvider !== "mock" && !apiKey) {
+      json(res, 401, { error: { message: "Selected agent requires a provider API key", type: "authentication_error" } });
+      return;
+    }
     const controller = new AbortController();
     req.on("aborted", () => controller.abort());
     res.on("close", () => {
