@@ -1,6 +1,8 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { createHash } from "node:crypto";
+import { promises as dns } from "node:dns";
 import type { ToolSpec } from "./types.js";
 
 // MCP client. Plug in any existing MCP server (Desktop Commander, filesystem,
@@ -8,9 +10,12 @@ import type { ToolSpec } from "./types.js";
 // `<server>__<tool>` so permission rules can target a whole server with "server__*".
 
 export interface McpServerConfig {
-  command: string;
+  transport?: "stdio" | "streamable-http";
+  command?: string;
+  url?: string;
   args?: string[];
   env?: Record<string, string>;
+  headers?: Record<string, string>;
   timeoutMs?: number;
   retries?: number;
 }
@@ -18,6 +23,26 @@ export interface McpServerConfig {
 export interface McpConfig {
   servers: Record<string, McpServerConfig>;
 }
+
+const isPrivateAddress = (address: string): boolean => {
+  const normalized = address.toLowerCase();
+  if (normalized === "::1" || normalized.startsWith("fc") || normalized.startsWith("fd") || normalized.startsWith("fe80:")) return true;
+  const parts = normalized.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part))) return false;
+  return parts[0] === 10 || parts[0] === 127 || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) ||
+    (parts[0] === 192 && parts[1] === 168) || (parts[0] === 169 && parts[1] === 254);
+};
+
+const validateRemoteUrl = async (value: string): Promise<URL> => {
+  const url = new URL(value);
+  if (url.protocol !== "https:") throw new Error("Remote MCP URLs must use HTTPS");
+  if (url.username || url.password) throw new Error("Credentials in MCP URLs are not allowed");
+  const addresses = await dns.lookup(url.hostname, { all: true });
+  if (!addresses.length || addresses.some((entry) => isPrivateAddress(entry.address))) {
+    throw new Error("Remote MCP host resolves to a private or local address");
+  }
+  return url;
+};
 
 export class McpHub {
   private clients = new Map<string, Client>();
@@ -27,11 +52,16 @@ export class McpHub {
   async connect(cfg: McpConfig): Promise<void> {
     for (const [name, s] of Object.entries(cfg.servers)) {
       try {
-        const transport = new StdioClientTransport({
-          command: s.command,
-          args: s.args ?? [],
-          env: { ...(process.env as Record<string, string>), ...(s.env ?? {}) },
-        });
+        const transport = s.transport === "streamable-http"
+          ? new StreamableHTTPClientTransport(await validateRemoteUrl(s.url ?? ""), {
+              requestInit: { headers: { ...(s.headers ?? {}) }, redirect: "error" },
+              redirectPolicy: "same-origin",
+            })
+          : new StdioClientTransport({
+              command: s.command ?? (() => { throw new Error("stdio MCP server requires a command"); })(),
+              args: s.args ?? [],
+              env: { ...(process.env as Record<string, string>), ...(s.env ?? {}) },
+            });
         const client = new Client({ name: "deepseek-ui", version: "0.0.1" });
         await client.connect(transport);
         this.clients.set(name, client);
