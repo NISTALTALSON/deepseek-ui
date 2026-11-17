@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { AssistantMessage, ReplyBlock, Session } from '../../services/chat/types.js'
-import { decideApproval, listApprovals, type ApprovalRecord } from '../../services/api/client.js'
+import { decideApproval, getRecoveryState, listApprovals, listRuns, resumeRun, type ApprovalRecord, type RecoveryState } from '../../services/api/client.js'
 import { useSettings } from '../../services/settings.js'
 import styles from './ActivityPanel.module.css'
 
@@ -43,15 +43,20 @@ const detailForBlock = (block: ReplyBlock) => {
 export const ActivityPanel = ({ session }: { session: Session }) => {
   const apiKey = useSettings((state) => state.apiKey) ?? ''
   const [approvals, setApprovals] = useState<ApprovalRecord[]>([])
+  const [recovery, setRecovery] = useState<RecoveryState | null>(null)
   useEffect(() => {
     let active = true
-    void listApprovals(apiKey).then((items) => {
-      if (active) {
-        setApprovals(items.filter((item) => item.conversationId === session.id))
+    void Promise.all([listApprovals(apiKey), listRuns(apiKey)]).then(async ([items, runs]) => {
+      if (!active) {
+        return
       }
+      setApprovals(items.filter((item) => item.conversationId === session.id))
+      const run = runs.find((item) => item.conversationId === session.id && ['paused', 'awaiting_approval'].includes(item.status))
+      setRecovery(run ? await getRecoveryState(apiKey, run.id) : null)
     }).catch(() => {
       if (active) {
         setApprovals([])
+        setRecovery(null)
       }
     })
     return () => { active = false }
@@ -87,6 +92,18 @@ export const ActivityPanel = ({ session }: { session: Session }) => {
         </span>
       </div>
       <div className={styles.list}>
+        {recovery?.recoverable && recovery.run.status !== 'awaiting_approval' ? (
+          <div className={styles.item}>
+            <div className={styles.itemTitle}>
+              <span className={styles.dot} data-kind="tool" />
+              <span>Interrupted run</span>
+            </div>
+            <div className={styles.detail}>
+              Last checkpoint: {recovery.checkpoint?.phase ?? 'unknown'}
+            </div>
+            <button type="button" onClick={() => void resumeRun(apiKey, recovery.run.id).then(() => setRecovery(null))}>Resume</button>
+          </div>
+        ) : null}
         {pendingApprovals.map((approval) => (
           <div className={styles.item} key={approval.id}>
             <div className={styles.itemTitle}>

@@ -353,6 +353,34 @@ test("gateway cancellation aborts active mock generation and is idempotent", asy
       headers: { "content-type": "application/json", "x-deepseek-ui-conversation": "cancel-test" },
       body: JSON.stringify({ model: "mock", messages: [{ role: "user", content: "cancel me" }] }),
     });
+
+    test("gateway persists a reconstructable checkpoint and exposes recovery state", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "deepseek-ui-checkpoint-gateway-"));
+      const gateway = await createGateway({ provider: "mock", dataFile: join(directory, "workspace.json") });
+      await new Promise<void>((resolve) => gateway.server.listen(0, "127.0.0.1", resolve));
+      const address = gateway.server.address();
+      const base = `http://127.0.0.1:${typeof address === "object" && address ? address.port : 0}`;
+      try {
+        const response = await fetch(`${base}/anthropic/v1/messages`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ model: "mock", messages: [{ role: "user", content: "checkpoint me" }] }),
+        });
+        await response.text();
+        const runs = await (await fetch(`${base}/runs`)).json() as { runs: Array<{ id: string; status: string }> };
+        assert.equal(runs.runs.length, 1);
+        const checkpointResponse = await fetch(`${base}/runs/${runs.runs[0].id}/checkpoint`);
+        const checkpointBody = await checkpointResponse.json() as { checkpoint?: { phase: string; messages: Message[] } };
+        assert.equal(checkpointResponse.status, 200);
+        assert.equal(checkpointBody.checkpoint?.phase, "completed");
+        assert.ok(checkpointBody.checkpoint?.messages.some((message) => message.role === "assistant"));
+        const recovery = await (await fetch(`${base}/runs/${runs.runs[0].id}/recovery`)).json() as { recoverable: boolean };
+        assert.equal(recovery.recoverable, false);
+      } finally {
+        await gateway.close();
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
     let runs = { runs: [] as Array<{ id: string }> };
     for (let attempt = 0; attempt < 20 && runs.runs.length === 0; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 25));

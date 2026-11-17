@@ -260,6 +260,43 @@ export const decideApproval = async (
   return ((await response.json()) as { approval: ApprovalRecord }).approval
 }
 
+export type RecoveryState = {
+  run: RunRecord
+  checkpoint?: {
+    phase: string
+    sequence: number
+    pendingToolCalls: Array<{ id: string; function: { name: string; arguments: string } }>
+    approvalIds: string[]
+  }
+  approval?: ApprovalRecord
+  recoverable: boolean
+}
+
+export const getRecoveryState = async (
+  apiKey: string,
+  runId: string,
+  workspace = 'local',
+  signal?: AbortSignal
+): Promise<RecoveryState> => {
+  const response = await request(`${API_ORIGIN}/runs/${encodeURIComponent(runId)}/recovery`, {
+    headers: { ...anthropicHeaders(apiKey, false), 'x-deepseek-ui-workspace': workspace },
+    signal,
+  })
+  return (await response.json()) as RecoveryState
+}
+
+export const resumeRun = async (
+  apiKey: string,
+  runId: string,
+  workspace = 'local'
+): Promise<RunRecord> => {
+  const response = await request(`${API_ORIGIN}/runs/${encodeURIComponent(runId)}/resume`, {
+    method: 'POST',
+    headers: { ...anthropicHeaders(apiKey, false), 'x-deepseek-ui-workspace': workspace },
+  })
+  return ((await response.json()) as { run: RunRecord }).run
+}
+
 export const listRuns = async (
   apiKey: string,
   workspace = 'local',
