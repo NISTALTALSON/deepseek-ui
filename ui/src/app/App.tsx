@@ -35,6 +35,7 @@ export const App = () => {
   const t = useTranslate()
   const isMobile = useIsMobile()
   const locale = useSettings((state) => state.locale)
+  const apiKey = useSettings((state) => state.apiKey)
   // 移动端侧边栏以独立抽屉管理开合状态
   const siderCollapsed = useSettings((state) => state.siderCollapsed) && !isMobile
   const ready = useChatStore((state) => state.ready)
@@ -75,10 +76,13 @@ export const App = () => {
 
   useEffect(() => {
     void initChat()
-    void loadAgents()
     // 首次打开先在设置里输入 API Key
     ensureApiKey()
   }, [])
+
+  useEffect(() => {
+    if (apiKey) void loadAgents()
+  }, [apiKey])
 
   return (
     <>

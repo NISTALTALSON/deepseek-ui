@@ -297,6 +297,36 @@
   }
 }
 
+.modelPicker {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 11px 0 7px;
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-brand-primary) 25%, var(--dsw-alias-border-l2));
+  border-radius: 11px;
+  color: var(--dsw-alias-label-primary);
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 6%, var(--dsw-alias-bg-base));
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .16s ease, border-color .16s ease;
+}
+
+.modelPicker:hover { border-color: var(--dsw-alias-brand-primary); background: color-mix(in srgb, var(--dsw-alias-brand-primary) 11%, var(--dsw-alias-bg-base)); }
+.modelMark { display: grid; place-items: center; width: 21px; height: 21px; border-radius: 7px; color: #fff; background: linear-gradient(145deg, #a99af2, #7562cb); font-family: Georgia, serif; font-size: 15px; }
+.pickerChevron { color: var(--dsw-alias-label-tertiary); font-size: 13px; }
+.agentPicker { gap: 0; padding-right: 6px; padding-left: 9px; }
+.agentPicker select { max-width: 112px; border: 0; outline: 0; color: inherit; background: transparent; font: inherit; font-size: 11px; cursor: pointer; }
+
+@media (max-width: 620px) {
+  .modelPicker { gap: 5px; padding-right: 8px; }
+  .agentPicker .toggleLabel { display: none; }
+  .agentPicker select { max-width: 92px; }
+}
+
 .right {
   display: flex;
   flex-shrink: 0;

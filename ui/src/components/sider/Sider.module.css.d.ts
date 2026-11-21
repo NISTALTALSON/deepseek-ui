@@ -1,9 +1,17 @@
 declare const styles: {
   readonly "sider": string;
   readonly "top": string;
+  readonly "brand": string;
+  readonly "brandMark": string;
   readonly "appName": string;
   readonly "newChat": string;
   readonly "newChatIcon": string;
+  readonly "workspaceNav": string;
+  readonly "navHeading": string;
+  readonly "workspaceLink": string;
+  readonly "workspaceLinkActive": string;
+  readonly "workspaceGlyph": string;
+  readonly "workspaceCount": string;
   readonly "listWrap": string;
   readonly "list": string;
   readonly "section": string;

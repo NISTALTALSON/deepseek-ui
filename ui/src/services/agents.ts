@@ -45,6 +45,10 @@ const headers = () => ({
 })
 
 export const loadAgents = async () => {
+  if (!useSettings.getState().apiKey) {
+    useAgents.setState({ agents: [], loading: false })
+    return
+  }
   useAgents.setState({ loading: true })
   try {
     const response = await request(`${API_ORIGIN}/agents?includeDisabled=true`, { headers: headers() })

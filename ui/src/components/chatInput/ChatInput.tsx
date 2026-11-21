@@ -32,7 +32,7 @@ import { useVoiceInput } from './useVoiceInput.js'
 import { VoiceButton } from './VoiceButton.js'
 import { Spectrum } from './Spectrum.js'
 import { useTranslate } from '../../i18n/index.js'
-import { openWorkspace, useWorkspace } from '../../services/workspace.js'
+import { MODEL_OPTIONS, openWorkspace, useWorkspace } from '../../services/workspace.js'
 import styles from './ChatInput.module.css'
 import { selectAgent, useAgents } from '../../services/agents.js'
 
@@ -59,6 +59,12 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
   const enabledIntegrations = useWorkspace((state) => state.integrations.filter((item) => item.enabled))
   const agents = useAgents((state) => state.agents.filter((agent) => agent.enabled))
   const selectedAgentId = useAgents((state) => state.selectedAgentId)
+  const selectedModel = useWorkspace((state) => state.model)
+  const modelEndpoint = useSettings((state) => state.modelEndpoint)
+  const modelId = useSettings((state) => state.modelId)
+  const modelLabel = modelEndpoint
+    ? modelId
+    : MODEL_OPTIONS.find((item) => item.id === selectedModel)?.name ?? 'Emily'
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const togglesRef = useRef<HTMLDivElement>(null)
@@ -209,11 +215,18 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
       <div className={styles.functionRow}>
         {/* 深度思考 / 智能搜索开关，tooltip 在按钮上方 */}
         <div ref={togglesRef} className={styles.toggles}>
-          <label className={styles.toggle}>
+          <Tooltip content="Choose the model and connection Emily uses">
+            <button type="button" className={styles.modelPicker} onClick={() => openWorkspace('models')}>
+              <span className={styles.modelMark}>e</span>
+              <span>{modelLabel}</span>
+              <span className={styles.pickerChevron}>⌄</span>
+            </button>
+          </Tooltip>
+          <label className={clsx(styles.toggle, styles.agentPicker)}>
             <span className={styles.toggleLabel}>Agent</span>
             <select aria-label="Select agent" value={selectedAgentId ?? ''} onChange={(event) => selectAgent(event.target.value || undefined)}>
-              <option value="">Normal chat</option>
-              {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name} · {agent.model}</option>)}
+              <option value="">Emily chat</option>
+              {agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
             </select>
           </label>
           <Tooltip content="Configure skills, plugins, MCP servers, and connectors">

@@ -30,21 +30,21 @@ export type SkillInfo = { name: string; description: string; version?: string; s
 export const MODEL_OPTIONS: ModelOption[] = [
   {
     id: 'deepseek-flash',
-    name: 'DeepSeek Flash',
-    description: 'Fast everyday answers with thinking and web search.',
-    badge: 'Fast',
+    name: 'Emily',
+    description: 'Your everyday assistant, connected to the active model endpoint.',
+    badge: 'Default',
   },
   {
     id: 'deepseek-v4-pro',
-    name: 'DeepSeek V4 Pro',
-    description: 'More capable reasoning for complex work and long context.',
-    badge: 'Pro',
+    name: 'Emily · Reasoning',
+    description: 'A deeper reasoning profile for research, planning, and complex work.',
+    badge: 'Reasoning',
   },
   {
     id: 'mock',
-    name: 'Local mock',
-    description: 'Deterministic local responses for setup, demos, and automated testing.',
-    badge: 'Offline',
+    name: 'Emily Sandbox',
+    description: 'A local demo profile for setup and offline exploration.',
+    badge: 'Local',
   },
 ]
 

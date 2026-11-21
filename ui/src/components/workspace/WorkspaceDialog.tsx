@@ -13,6 +13,7 @@ import {
 } from '../../services/workspace.js'
 import { API_ORIGIN, request } from '../../services/api/client.js'
 import { useSettings } from '../../services/settings.js'
+import { openSettings } from '../settings/settingsDialogState.js'
 import styles from './WorkspaceDialog.module.css'
 
 const tabs: { id: WorkspaceTab; label: string }[] = [
@@ -34,19 +35,31 @@ export const WorkspaceDialog = () => {
 
 const WorkspaceContent = () => {
   const tab = useWorkspace((state) => state.tab)
+  const gatewayOnline = useWorkspace((state) => state.gatewayOnline)
+  const integrations = useWorkspace((state) => state.integrations)
+  const skills = useWorkspace((state) => state.gatewaySkillInfo)
+  const tools = useWorkspace((state) => state.gatewayTools)
+  const counts: Partial<Record<WorkspaceTab, number>> = {
+    skills: skills.length,
+    tools: tools.length,
+    plugins: integrations.filter((item) => item.kind === 'plugin').length,
+    mcp: integrations.filter((item) => item.kind === 'mcp').length,
+    connectors: integrations.filter((item) => item.kind === 'connector').length,
+  }
   useEffect(() => {
     void refreshGatewayCapabilities()
   }, [])
   return (
     <Modal
-      title="Workspace"
+      title="Emily workspace"
       closable
       className={styles.dialog}
       mainClassName={styles.main}
       onClose={closeWorkspace}
     >
       <nav className={styles.tabs} aria-label="Workspace sections">
-        {tabs.map((item) => (
+        <div className={styles.navLabel}>BUILD YOUR WORKSPACE</div>
+        {tabs.map((item, index) => (
           <button
             key={item.id}
             className={`${styles.tab} ${tab === item.id ? styles.tabActive : ''}`}
@@ -54,9 +67,15 @@ const WorkspaceContent = () => {
             aria-selected={tab === item.id}
             onClick={() => useWorkspace.setState({ tab: item.id })}
           >
-            {item.label}
+            <span className={styles.tabIcon}>{['◈', '✦', '⌘', '◇', '⛓', '↗'][index]}</span>
+            <span>{item.label}</span>
+            {counts[item.id] !== undefined ? <span className={styles.tabCount}>{counts[item.id]}</span> : null}
           </button>
         ))}
+        <div className={styles.navStatus}>
+          <i className={gatewayOnline ? styles.onlineDot : styles.offlineDot} />
+          <span>{gatewayOnline ? 'Emily runtime connected' : 'Runtime unavailable'}</span>
+        </div>
       </nav>
       <div className={styles.panel}>
         {tab === 'models' ? <ModelsPanel /> : null}
@@ -72,10 +91,22 @@ const WorkspaceContent = () => {
 
 const ModelsPanel = () => {
   const selected = useWorkspace((state) => state.model)
+  const endpoint = useSettings((state) => state.modelEndpoint)
+  const modelId = useSettings((state) => state.modelId)
   return (
-    <>
-      <h2 className={styles.heading}>Choose a model</h2>
-      <p className={styles.description}>Switch models per conversation. Your choice is saved locally.</p>
+    <div className={styles.sectionPage}>
+      <div className={styles.sectionEyebrow}>MODEL STUDIO</div>
+      <h2 className={styles.heading}>Models</h2>
+      <p className={styles.description}>Choose how Emily thinks. Your model setup stays attached to every new conversation.</p>
+      <div className={styles.connectionCard}>
+        <div className={styles.connectionIcon}>e</div>
+        <div className={styles.connectionInfo}>
+          <strong>Emily model endpoint</strong>
+          <span>{endpoint || 'Using the local Emily gateway'}</span>
+          {endpoint ? <small>Model ID · {modelId}</small> : null}
+        </div>
+        <span className={`${styles.connectionBadge} ${endpoint ? styles.connectionReady : ''}`}>{endpoint ? 'CUSTOM' : 'GATEWAY'}</span>
+      </div>
       <div className={styles.cards}>
         {MODEL_OPTIONS.map((model) => (
           <button
@@ -95,7 +126,8 @@ const ModelsPanel = () => {
           </button>
         ))}
       </div>
-    </>
+      <button type="button" className={styles.manageLink} onClick={() => openSettings('data')}>Configure model endpoint and API key <span>↗</span></button>
+    </div>
   )
 }
 
@@ -151,23 +183,22 @@ const SkillsPanel = () => {
     }
   }
   return (
-    <>
+    <div className={styles.sectionPage}>
+      <div className={styles.sectionEyebrow}>BEHAVIOR & KNOWLEDGE</div>
       <h2 className={styles.heading}>Skills</h2>
       <p className={styles.description}>Choose reusable instructions that shape how the assistant works.</p>
       <div className={styles.cards}>
         {skills.map((skill) => (
-          <button
-            key={skill.name}
-            type="button"
-            className={`${styles.card} ${enabled.includes(skill.name) ? styles.selected : ''}`}
-            onClick={() => { toggleSkill(skill.name); void inspect(skill.name) }}
-          >
+          <div key={skill.name} className={`${styles.resourceCard} ${enabled.includes(skill.name) ? styles.selected : ''}`}>
+            <button type="button" className={styles.resourceSelect} onClick={() => { toggleSkill(skill.name); void inspect(skill.name) }} aria-label={`${enabled.includes(skill.name) ? 'Disable' : 'Enable'} ${skill.name}`}>
             <div className={styles.cardBody}>
-              <div className={styles.cardTitle}>{skill.name}<span className={styles.badge}>{skill.version ?? 'unversioned'}</span></div>
+              <div className={styles.cardTitle}><span className={styles.resourceGlyph}>✦</span>{skill.name}<span className={styles.badge}>{skill.version ?? 'unversioned'}</span></div>
               <div className={styles.cardText}>{skill.description || 'Load this skill before handling matching tasks.'}</div>
             </div>
             {enabled.includes(skill.name) ? <span className={styles.check}>✓</span> : null}
-          </button>
+            </button>
+            <button type="button" className={styles.cardAction} onClick={() => void inspect(skill.name)}>Details</button>
+          </div>
         ))}
       </div>
       {skills.length === 0 ? (
@@ -187,7 +218,7 @@ const SkillsPanel = () => {
             <Button size="s" variant="danger" disabled={busy} onClick={() => void remove()}>Remove</Button>
           </div>
         </div> : null}
-    </>
+    </div>
   )
 }
 
@@ -201,15 +232,17 @@ const IntegrationPanel = ({ kind }: { kind: 'plugin' | 'mcp' | 'connector' }) =>
       ? 'Connect local or remote MCP servers through the gateway configuration.'
       : 'Manage integrations that can provide context and actions to the assistant.'
   return (
-    <>
+    <div className={styles.sectionPage}>
+      <div className={styles.sectionEyebrow}>INTEGRATIONS</div>
       <h2 className={styles.heading}>{title}</h2>
       <p className={styles.description}>{description}</p>
       <div className={styles.cards}>
         {integrations.length === 0 ? <div className={styles.empty}>No {title.toLowerCase()} configured yet.</div> : null}
         {integrations.map((integration) => (
-          <div key={integration.id} className={`${styles.card} ${integration.enabled ? styles.selected : ''}`}>
+          <div key={integration.id} className={`${styles.resourceCard} ${integration.enabled ? styles.selected : ''}`}>
             <div className={styles.cardBody}>
               <div className={styles.cardTitle}>
+                <span className={styles.resourceGlyph}>{kind === 'mcp' ? '⛓' : kind === 'plugin' ? '◇' : '↗'}</span>
                 {integration.name}
                 <span className={`${styles.status} ${integration.status === 'connected' ? styles.statusConnected : ''}`}>
                   {integration.status === 'connected' ? 'Connected' : 'Available'}
@@ -240,27 +273,28 @@ const IntegrationPanel = ({ kind }: { kind: 'plugin' | 'mcp' | 'connector' }) =>
           }}
         >Add</Button>
       </div>
-    </>
+    </div>
   )
 }
 
 const ToolsPanel = () => {
   const tools = useWorkspace((state) => state.gatewayTools)
   return (
-    <>
-      <h2 className={styles.heading}>Available tools</h2>
+    <div className={styles.sectionPage}>
+      <div className={styles.sectionEyebrow}>CAPABILITIES</div>
+      <h2 className={styles.heading}>Tools</h2>
       <p className={styles.description}>These are the tools the gateway actually discovered. Agents must explicitly allow them.</p>
       <div className={styles.cards}>
         {tools.map((tool) => (
-          <div className={styles.card} key={tool.name}>
+          <div className={styles.resourceCard} key={tool.name}>
             <div className={styles.cardBody}>
-              <div className={styles.cardTitle}>{tool.name}<span className={styles.badge}>{tool.readOnly ? 'Read-only' : 'Policy checked'}</span></div>
+              <div className={styles.cardTitle}><span className={styles.resourceGlyph}>⌘</span>{tool.name}<span className={styles.badge}>{tool.readOnly ? 'Read-only' : 'Approval required'}</span></div>
               <div className={styles.cardText}>{tool.description}</div>
             </div>
           </div>
         ))}
         {!tools.length ? <div className={styles.empty}>No tools are currently discovered from configured MCP servers.</div> : null}
       </div>
-    </>
+    </div>
   )
 }
