@@ -134,7 +134,6 @@ export const App = () => {
               <SessionView
                 session={session}
                 streaming={streaming}
-                siderCollapsed={siderCollapsed}
               />
             ) : (
               <Welcome />
