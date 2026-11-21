@@ -1,0 +1,200 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400" role="img" aria-labelledby="heroTitle heroDesc" font-family="Inter, 'SF Pro Display', 'Segoe UI', system-ui, -apple-system, sans-serif">
+  <title id="heroTitle">DeepSeek UI — local-first agent workspace</title>
+  <desc id="heroDesc">Animated banner: MCP, skills, web search, fetch, artifacts and checkpoints orbit a central agent hub beside the DeepSeek UI wordmark.</desc>
+
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#050810"/>
+      <stop offset="0.55" stop-color="#070D1B"/>
+      <stop offset="1" stop-color="#0A1026"/>
+    </linearGradient>
+    <linearGradient id="titleGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="0.6" stop-color="#D9FBFF"/>
+      <stop offset="1" stop-color="#67E8F9"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#818CF8"/>
+      <stop offset="0.5" stop-color="#22D3EE"/>
+      <stop offset="1" stop-color="#A855F7"/>
+    </linearGradient>
+    <linearGradient id="underline" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#22D3EE"/>
+      <stop offset="0.7" stop-color="#818CF8"/>
+      <stop offset="1" stop-color="#A855F7" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="glowCyan" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#22D3EE" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#22D3EE" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowIndigo" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#6366F1" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#6366F1" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowViolet" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#A855F7" stop-opacity="0.4"/>
+      <stop offset="1" stop-color="#A855F7" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="36" height="36" patternUnits="userSpaceOnUse">
+      <path d="M36 0H0V36" fill="none" stroke="#16223E" stroke-width="1"/>
+    </pattern>
+    <linearGradient id="gridFade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.35"/>
+      <stop offset="0.7" stop-color="#FFFFFF" stop-opacity="0.06"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <mask id="gridMask">
+      <rect width="1200" height="400" fill="url(#gridFade)"/>
+    </mask>
+    <clipPath id="frame">
+      <rect width="1200" height="400" rx="26"/>
+    </clipPath>
+    <filter id="blur60" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="58"/>
+    </filter>
+    <filter id="blur26" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="26"/>
+    </filter>
+  </defs>
+
+  <g clip-path="url(#frame)">
+    <rect width="1200" height="400" fill="url(#bg)"/>
+    <rect width="1200" height="400" fill="url(#grid)" mask="url(#gridMask)"/>
+
+    <g filter="url(#blur60)">
+      <circle cx="1040" cy="80" r="170" fill="url(#glowIndigo)">
+        <animate attributeName="opacity" values="0.55;0.9;0.55" dur="11s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="880" cy="330" r="190" fill="url(#glowCyan)">
+        <animate attributeName="opacity" values="0.5;0.85;0.5" dur="14s" repeatCount="indefinite"/>
+      </circle>
+      <circle cx="520" cy="380" r="150" fill="url(#glowViolet)">
+        <animate attributeName="opacity" values="0.35;0.6;0.35" dur="16s" repeatCount="indefinite"/>
+      </circle>
+    </g>
+
+    <!-- Wordmark -->
+    <g>
+      <rect x="72" y="70" width="296" height="26" rx="13" fill="#0C1730" stroke="#1B2C4F"/>
+      <circle cx="88" cy="83" r="3.5" fill="#34D399">
+        <animate attributeName="opacity" values="1;0.25;1" dur="2.2s" repeatCount="indefinite"/>
+      </circle>
+      <text x="100" y="87.5" font-size="10.5" font-weight="600" letter-spacing="2.1" fill="#7DD3FC">LOCAL-FIRST · PROVIDER-AGNOSTIC · MIT</text>
+    </g>
+
+    <text x="70" y="178" font-size="68" font-weight="800" letter-spacing="-2" fill="url(#titleGrad)">DeepSeek UI</text>
+
+    <text x="72" y="220" font-size="19.5" font-weight="500" fill="#C3CEE8">MCP tools, skills, approvals, durable runs,</text>
+    <text x="72" y="247" font-size="19.5" font-weight="500" fill="#8FA1C7">and cited web research — around DeepSeek.</text>
+
+    <path d="M72 272 H372" stroke="url(#underline)" stroke-width="3" stroke-linecap="round" stroke-dasharray="300" stroke-dashoffset="300">
+      <animate attributeName="stroke-dashoffset" values="300;0" dur="1.6s" begin="0.2s" fill="freeze"/>
+    </path>
+
+    <!-- Capability pills -->
+    <g>
+      <g transform="translate(72 300)">
+        <rect width="146" height="30" rx="15" fill="#0B1428" stroke="#233658"/>
+        <circle cx="17" cy="15" r="3" fill="#22D3EE"/>
+        <text x="28" y="19" font-size="11.5" font-weight="600" letter-spacing="0.6" fill="#AFC5E6">research engine</text>
+      </g>
+      <g transform="translate(228 300)">
+        <rect width="162" height="30" rx="15" fill="#0B1428" stroke="#233658"/>
+        <circle cx="17" cy="15" r="3" fill="#818CF8"/>
+        <text x="28" y="19" font-size="11.5" font-weight="600" letter-spacing="0.6" fill="#AFC5E6">checkpointed runs</text>
+      </g>
+      <g transform="translate(400 300)">
+        <rect width="76" height="30" rx="15" fill="#0B1428" stroke="#233658"/>
+        <circle cx="17" cy="15" r="3" fill="#A855F7"/>
+        <text x="28" y="19" font-size="11.5" font-weight="600" letter-spacing="0.6" fill="#AFC5E6">MIT</text>
+      </g>
+    </g>
+
+    <g transform="translate(72 360)">
+      <circle cx="4" cy="-4" r="2.5" fill="#34D399">
+        <animate attributeName="opacity" values="1;0.2;1" dur="1.8s" repeatCount="indefinite"/>
+      </circle>
+      <text x="16" y="0" font-size="11" letter-spacing="0.4" fill="#6C7FA6">gateway 127.0.0.1:8787 · research ready · mock results labeled</text>
+    </g>
+
+    <!-- Agent graph -->
+    <g transform="translate(930 200)">
+      <circle r="152" fill="#081120" opacity="0.55"/>
+      <circle r="152" fill="none" stroke="#1A2744" stroke-width="1" stroke-dasharray="2 8"/>
+      <circle r="118" fill="none" stroke="#1E2C4C" stroke-width="1"/>
+      <circle r="86" fill="none" stroke="#24345C" stroke-width="1"/>
+
+      <g>
+        <circle r="118" fill="none" stroke="url(#accent)" stroke-width="2" stroke-linecap="round" stroke-dasharray="70 672">
+          <animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="26s" repeatCount="indefinite"/>
+        </circle>
+      </g>
+      <g>
+        <circle r="86" fill="none" stroke="#67E8F9" stroke-width="1.4" stroke-linecap="round" stroke-dasharray="26 514" opacity="0.75">
+          <animateTransform attributeName="transform" type="rotate" from="360" to="0" dur="18s" repeatCount="indefinite"/>
+        </circle>
+      </g>
+
+      <g>
+        <animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="30s" repeatCount="indefinite"/>
+        <circle cx="118" cy="0" r="4.5" fill="#67E8F9"/>
+        <circle cx="-118" cy="0" r="3" fill="#818CF8" opacity="0.8"/>
+      </g>
+      <g>
+        <animateTransform attributeName="transform" type="rotate" from="360" to="0" dur="20s" repeatCount="indefinite"/>
+        <circle cx="86" cy="0" r="3.5" fill="#A855F7"/>
+      </g>
+
+      <g>
+        <rect x="-48" y="-48" width="96" height="96" rx="26" fill="#0A1428" stroke="url(#accent)" stroke-width="1.6"/>
+        <rect x="-34" y="-34" width="68" height="68" rx="18" fill="#0E1B36" stroke="#22345C"/>
+        <text x="0" y="8" text-anchor="middle" font-size="22" font-weight="800" letter-spacing="1" fill="url(#accent)">DS</text>
+        <circle r="62" fill="none" stroke="#22D3EE" stroke-width="1" opacity="0.25">
+          <animate attributeName="r" values="58;70;58" dur="4.5s" repeatCount="indefinite"/>
+          <animate attributeName="opacity" values="0.3;0;0.3" dur="4.5s" repeatCount="indefinite"/>
+        </circle>
+      </g>
+    </g>
+
+    <!-- Tool satellites -->
+    <g stroke="#24365B" stroke-width="1" stroke-dasharray="3 7" fill="none">
+      <path d="M766 113 L884 172">
+        <animate attributeName="stroke-dashoffset" values="0;-40" dur="3.4s" repeatCount="indefinite"/>
+      </path>
+      <path d="M1006 104 L972 162">
+        <animate attributeName="stroke-dashoffset" values="0;-40" dur="4s" repeatCount="indefinite"/>
+      </path>
+      <path d="M1020 279 L974 236">
+        <animate attributeName="stroke-dashoffset" values="0;-40" dur="3.8s" repeatCount="indefinite"/>
+      </path>
+      <path d="M766 305 L884 230">
+        <animate attributeName="stroke-dashoffset" values="0;-40" dur="4.4s" repeatCount="indefinite"/>
+      </path>
+    </g>
+
+    <g font-family="'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, monospace">
+      <g transform="translate(700 96)">
+        <rect width="132" height="34" rx="10" fill="#0A1428" stroke="#2B4067"/>
+        <circle cx="16" cy="17" r="3" fill="#22D3EE"/>
+        <text x="28" y="21.5" font-size="11.5" fill="#BFE9F6">web_search</text>
+      </g>
+      <g transform="translate(1006 88)">
+        <rect width="126" height="34" rx="10" fill="#0A1428" stroke="#2B4067"/>
+        <circle cx="16" cy="17" r="3" fill="#818CF8"/>
+        <text x="28" y="21.5" font-size="11.5" fill="#C7D2FE">web_fetch</text>
+      </g>
+      <g transform="translate(1020 262)">
+        <rect width="140" height="34" rx="10" fill="#0A1428" stroke="#2B4067"/>
+        <circle cx="16" cy="17" r="3" fill="#A855F7"/>
+        <text x="28" y="21.5" font-size="11.5" fill="#E9D5FF">artifact_create</text>
+      </g>
+      <g transform="translate(700 288)">
+        <rect width="124" height="34" rx="10" fill="#0A1428" stroke="#2B4067"/>
+        <circle cx="16" cy="17" r="3" fill="#34D399"/>
+        <text x="28" y="21.5" font-size="11.5" fill="#BBF7D0">checkpoint</text>
+      </g>
+    </g>
+
+    <rect x="0.5" y="0.5" width="1199" height="399" rx="25.5" fill="none" stroke="#1A2846"/>
+  </g>
+</svg>
