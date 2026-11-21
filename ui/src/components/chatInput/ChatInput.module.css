@@ -8,8 +8,8 @@
   cursor: text;
   font-size: 16px;
   line-height: var(--line-height);
-  border-radius: 24px;
-  border: 1px solid var(--dsw-alias-border-l2-darkmode-thin);
+  border-radius: 20px;
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-border-l2) 80%, #9a87e6 20%);
   background: var(--dsw-specific-input-major);
   overflow: hidden;
 }
@@ -24,7 +24,7 @@
   box-shadow:
     0 4px 12px 0 rgba(0, 0, 0, 0.02),
     0 2px 2px 0 rgba(72, 104, 178, 0.01),
-    0 30px 60px 0 rgba(72, 104, 178, 0.03);
+    0 18px 52px 0 rgba(76, 58, 139, 0.1);
 
   [data-ds-dark-theme] & {
     box-shadow: none;

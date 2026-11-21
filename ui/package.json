@@ -1,7 +1,7 @@
 {
-  "name": "chat-demo",
+  "name": "emily-ui",
   "version": "0.1.1",
-  "description": "基于 DeepSeek API 的静态聊天示例。",
+  "description": "Emily AI chat workspace with a configurable model connection.",
   "license": "MIT",
   "private": true,
   "type": "module",

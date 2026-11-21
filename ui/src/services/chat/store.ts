@@ -1091,7 +1091,9 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
         const events = streamMessage(
           useSettings.getState().apiKey ?? '',
           {
-            model: initial.model ?? MODEL,
+            model: useSettings.getState().modelEndpoint
+              ? useSettings.getState().modelId
+              : initial.model ?? MODEL,
             system: [
               SYSTEM_PROMPT,
               `Enabled skills: ${useWorkspace.getState().enabledSkills.join(', ') || 'none'}.`,
@@ -1117,7 +1119,9 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
               .integrations.filter((item) => item.enabled)
               .map((item) => item.id)
               .join(','),
-            'x-deepseek-ui-provider': (initial.model ?? MODEL) === 'mock' ? 'mock' : 'deepseek',
+            'x-deepseek-ui-provider': useSettings.getState().modelEndpoint
+              ? 'emily'
+              : (initial.model ?? MODEL) === 'mock' ? 'mock' : 'deepseek',
             ...(useAgents.getState().selectedAgentId ? { 'x-deepseek-ui-agent': useAgents.getState().selectedAgentId ?? '' } : {}),
             ...(getSession(sessionId)?.projectId ? { 'x-deepseek-ui-project': getSession(sessionId)?.projectId } : {}),
           }

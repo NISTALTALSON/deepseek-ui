@@ -11,6 +11,8 @@ export type ThemePreference = 'light' | 'dark' | 'system'
 /** 本机设置，存 localStorage：API Key、语言、主题、位置、朗读音色、深度思考与智能搜索开关、侧边栏收起状态 */
 type Settings = {
   apiKey: string | null
+  modelEndpoint: string
+  modelId: string
   locale: Locale
   themePreference: ThemePreference
   location: UserLocation | null
@@ -23,6 +25,8 @@ type Settings = {
 
 const KEYS = {
   apiKey: 'chat-demo:api-key',
+  modelEndpoint: 'emily:model-endpoint',
+  modelId: 'emily:model-id',
   locale: 'chat-demo:locale',
   location: 'chat-demo:location',
   themePreference: 'chat-demo:theme-preference',
@@ -91,6 +95,8 @@ const initialTtsVoice = (): TtsVoice => (read(KEYS.ttsVoice) === 'tide' ? 'tide'
 
 export const useSettings = create<Settings>(() => ({
   apiKey: read(KEYS.apiKey),
+  modelEndpoint: read(KEYS.modelEndpoint) ?? '',
+  modelId: read(KEYS.modelId) ?? 'emily',
   locale: initialLocale(),
   location: initialLocation(),
   themePreference: initialThemePreference(),
@@ -125,6 +131,18 @@ export const setTtsVoice = (ttsVoice: TtsVoice) => {
 export const setApiKey = (apiKey: string | null) => {
   write(KEYS.apiKey, apiKey)
   useSettings.setState({ apiKey })
+}
+
+export const setModelEndpoint = (modelEndpoint: string) => {
+  const normalized = modelEndpoint.trim().replace(/\/+$/, '')
+  write(KEYS.modelEndpoint, normalized || null)
+  useSettings.setState({ modelEndpoint: normalized })
+}
+
+export const setModelId = (modelId: string) => {
+  const normalized = modelId.trim() || 'emily'
+  write(KEYS.modelId, normalized)
+  useSettings.setState({ modelId: normalized })
 }
 
 export const setThinking = (thinking: boolean) => {

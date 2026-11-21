@@ -9,6 +9,7 @@ import { MobileHeader } from './MobileHeader.js'
 import { ActivityPanel } from './ActivityPanel.js'
 import styles from './SessionView.module.css'
 import { openWorkspace, MODEL_OPTIONS, useWorkspace } from '../../services/workspace.js'
+import { useSettings } from '../../services/settings.js'
 import { ArtifactPanel } from '../artifacts/ArtifactPanel.js'
 
 /** 会话页：标题栏（移动端为顶栏）+ 消息列表，输入框吸底 */
@@ -25,7 +26,9 @@ export const SessionView = ({
   const isMobile = useIsMobile()
   const title = session.title || t('untitledChat')
   const model = useWorkspace((state) => state.model)
-  const modelName = MODEL_OPTIONS.find((item) => item.id === model)?.name ?? model
+  const modelName = useSettings((state) => state.modelEndpoint)
+    ? 'Emily · custom model'
+    : MODEL_OPTIONS.find((item) => item.id === model)?.name ?? model
   const [activityOpen, setActivityOpen] = useState(false)
   const [artifactsOpen, setArtifactsOpen] = useState(false)
   return (

@@ -31,11 +31,11 @@
   max-width: calc(100% - 88px);
   box-sizing: border-box;
   padding: 10px 16px;
-  border-radius: 22px;
+  border-radius: 20px 20px 6px 20px;
   font-size: 16px;
   line-height: 24px;
   color: var(--dsw-alias-label-primary);
-  background-color: var(--dsw-specific-bubble);
+  background-color: color-mix(in srgb, var(--dsw-specific-bubble) 72%, #b6a6f4 28%);
   white-space: pre-wrap;
   word-break: break-word;
 }

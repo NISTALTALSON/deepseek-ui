@@ -24,15 +24,19 @@
 
 .appName {
   min-width: 0;
-  padding-left: 4px;
+  padding-left: 2px;
   overflow: hidden;
-  font-size: 20px;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 22px;
   line-height: 22px;
   font-weight: 600;
   white-space: nowrap;
   text-overflow: ellipsis;
-  color: var(--dsw-alias-brand-primary);
+  color: var(--dsw-alias-label-primary);
 }
+
+.brand { display: flex; align-items: center; gap: 10px; }
+.brandMark { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 11px; color: white; background: linear-gradient(145deg, #a99af2, #7562cb); font-family: Georgia, serif; font-size: 20px; }
 
 .newChat {
   position: relative;
@@ -44,8 +48,8 @@
   width: 100%;
   height: 40px;
   padding: 0 16px;
-  border-radius: 100px;
-  border: 1px solid rgba(103, 158, 254, 0);
+  border-radius: 13px;
+  border: 1px solid var(--dsw-alias-border-l1);
   background: var(--dsw-alias-button-elevated-fill);
   color: var(--dsw-alias-label-primary);
   font: inherit;

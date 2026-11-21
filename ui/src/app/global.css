@@ -1,6 +1,20 @@
 :root {
   --message-list-max-width: 840px;
   --message-list-padding-horizontal: 44px;
+  --dsw-static-blue-500: #7967c7;
+  --dsw-static-blue-450: #907fda;
+  --dsw-static-blue-400: #a89ae4;
+  --dsw-static-blue-50: #f4f1ff;
+  --dsw-static-blue-100: #eae5ff;
+  --dsw-static-blue-300: #c9bdf6;
+  --dsw-static-neutral-bluish-50: #fbfaf8;
+  --dsw-static-neutral-bluish-60: #f6f4f1;
+  --dsw-static-neutral-bluish-75: #f1efeb;
+  --dsw-static-neutral-bluish-100: #e9e6e1;
+  --dsw-static-neutral-bluish-950: #17161c;
+  --dsw-static-neutral-bluish-900: #201f27;
+  --dsw-static-neutral-bluish-850: #292832;
+  --dsw-static-neutral-bluish-800: #33323d;
 }
 
 @media (max-width: 1023px) {
@@ -23,10 +37,14 @@ body {
   font-feature-settings: 'kern';
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background-image: radial-gradient(ellipse at 75% 0%, rgba(210, 201, 255, .16), transparent 36%);
 
   --scroll-color: rgba(0, 0, 0, 0.08);
   --scroll-color-hover: rgba(0, 0, 0, 0.15);
 }
+
+body:not([data-ds-dark-theme]) { --dsw-static-blue-500: #7967c7; --dsw-static-blue-450: #907fda; --dsw-static-blue-400: #a89ae4; --dsw-alias-bg-base: #fbfaf8; --dsw-specific-sidebar-fill: #f4f2ef; --dsw-specific-bubble: #f0edf9; }
+body[data-ds-dark-theme] { --dsw-static-blue-500: #907fda; --dsw-static-blue-450: #a99af2; --dsw-static-blue-400: #b5a9ed; --dsw-alias-bg-base: #17161c; --dsw-specific-sidebar-fill: #1d1c24; --dsw-specific-bubble: #302c3e; }
 
 body.dark {
   color-scheme: dark;
