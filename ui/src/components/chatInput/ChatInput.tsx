@@ -26,7 +26,7 @@ import { Tooltip } from '../base/Tooltip.js'
 import { ensureApiKey } from '../settings/settingsDialogState.js'
 import { DragMask, useFileDrop } from './DragMask.js'
 import { showToast } from '../base/toastState.js'
-import { ACCEPT, useUploads } from '../../services/attachments.js'
+import { ACCEPT, isImage, resolveMimeType, useUploads } from '../../services/attachments.js'
 import { DraftAttachments } from './DraftAttachments.js'
 import { useVoiceInput } from './useVoiceInput.js'
 import { VoiceButton } from './VoiceButton.js'
@@ -46,8 +46,9 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
   const t = useTranslate()
   const draft = useDrafts((state) => state.drafts.get(sessionId) ?? EMPTY_DRAFT)
   const { text, attachments } = draft
+  const modelEndpoint = useSettings((state) => state.modelEndpoint)
   const setText = (value: string) => setDraftText(sessionId, value)
-  const draftReady = useUploads((state) => prepareDraftMessage(draft, state.tasks) !== null)
+  const draftReady = useUploads((state) => prepareDraftMessage(draft, state.tasks, Boolean(modelEndpoint)) !== null)
   const streaming = useChatStore(
     (state) => sessionId !== null && Object.hasOwn(state.streaming, sessionId)
   )
@@ -60,7 +61,6 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
   const agents = useAgents((state) => state.agents.filter((agent) => agent.enabled))
   const selectedAgentId = useAgents((state) => state.selectedAgentId)
   const selectedModel = useWorkspace((state) => state.model)
-  const modelEndpoint = useSettings((state) => state.modelEndpoint)
   const modelId = useSettings((state) => state.modelId)
   const modelLabel = modelEndpoint
     ? modelId
@@ -90,7 +90,14 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
     if (files.length === 0 || useChatStore.getState().importingHistory || !ensureApiKey()) {
       return
     }
-    const error = addDraftFiles(sessionId, files, useSettings.getState().apiKey ?? '')
+    const inlineImages = Boolean(useSettings.getState().modelEndpoint)
+    const supportedDirectImage = (file: File) =>
+      ['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(resolveMimeType(file))
+    if (inlineImages && files.some((file) => !isImage(resolveMimeType(file)) || !supportedDirectImage(file))) {
+      showToast({ key: 'uploadUnsupportedFormat' })
+      return
+    }
+    const error = addDraftFiles(sessionId, files, useSettings.getState().apiKey ?? '', inlineImages)
     if (error) {
       showToast(error)
     }
@@ -148,7 +155,11 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
     if (
       useChatStore.getState().importingHistory ||
       voice.status !== 'idle' ||
-      !prepareDraftMessage(getDraft(sessionId), useUploads.getState().tasks)
+      !prepareDraftMessage(
+        getDraft(sessionId),
+        useUploads.getState().tasks,
+        Boolean(useSettings.getState().modelEndpoint)
+      )
     ) {
       return
     }
@@ -174,12 +185,21 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
         }
       }}
     >
-      <DraftAttachments items={attachments} onRetry={retryFile} onRemove={removeFile} />
+      <DraftAttachments
+        items={attachments}
+        inlineImages={Boolean(modelEndpoint)}
+        onRetry={retryFile}
+        onRemove={removeFile}
+      />
       <div className={styles.textareaWrapper}>
         <textarea
           ref={textareaRef}
           className={clsx(styles.textarea, recording && isMobile && styles.textareaHidden)}
-          placeholder={t('chatInputPlaceholderChat')}
+          placeholder={
+            modelEndpoint
+              ? 'Attach a lymph-node tissue patch, then describe what to review…'
+              : t('chatInputPlaceholderChat')
+          }
           rows={2}
           // 移动端不自动聚焦，避免一打开就弹出键盘
           autoFocus={!isMobile}

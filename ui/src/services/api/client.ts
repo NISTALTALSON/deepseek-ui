@@ -170,16 +170,35 @@ export async function* streamMessage(
   signal: AbortSignal,
   extraHeaders: Record<string, string> = {}
 ): AsyncGenerator<MessageStreamEvent> {
+  const directEndpoint = Boolean(useSettings.getState().modelEndpoint)
+  const reminders = body.messages.filter((message) => message.role === 'latest_reminder')
+  const messages = body.messages
+    .filter((message) => message.role !== 'latest_reminder')
+    .map((message) =>
+      message.role === 'assistant'
+        ? { ...message, content: message.content.filter((block) => block.type === 'text') }
+        : message
+    )
+    .filter((message) => message.role !== 'assistant' || message.content.length > 0)
+  const requestBody = directEndpoint
+    ? {
+        model: body.model,
+        max_tokens: 4096,
+        system: [body.system, ...reminders.map((message) => message.content)].filter(Boolean).join('\n\n'),
+        messages,
+        stream: true,
+      }
+    : { ...body, stream: true }
   const response = await request(`${messagesBaseUrl()}/messages`, {
     method: 'POST',
     headers: {
-      ...anthropicHeaders(apiKey, hasFile(body)),
+      ...anthropicHeaders(apiKey, !directEndpoint && hasFile(body)),
       'anthropic-version': '2023-06-01',
       'Content-Type': 'application/json',
       Accept: 'text/event-stream',
-      ...extraHeaders,
+      ...(directEndpoint ? {} : extraHeaders),
     },
-    body: JSON.stringify({ ...body, stream: true }),
+    body: JSON.stringify(requestBody),
     signal,
   })
   const contentType = response.headers.get('Content-Type') ?? ''

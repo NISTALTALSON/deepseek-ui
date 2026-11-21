@@ -11,7 +11,7 @@
   }
 }
 
-.container::before { content: 'YOU / NOTE'; margin: 0 0 9px; color: var(--emily-muted); font: 600 9px/1.4 var(--emily-mono); letter-spacing: .1em; }
+.container::before { content: 'PATCH INPUT / USER NOTE'; margin: 0 0 9px; color: var(--emily-muted); font: 600 9px/1.4 var(--emily-mono); letter-spacing: .1em; }
 
 .files {
   display: flex;
@@ -21,6 +21,7 @@
   gap: 10px;
   max-width: 100%;
   margin-bottom: 8px;
+  --message-file-image-size: clamp(180px, 28vw, 310px);
 }
 
 .filesWithDocuments {

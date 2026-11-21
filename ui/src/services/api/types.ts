@@ -147,7 +147,9 @@ export type TextBlockParam = { type: 'text'; text: string }
  */
 export type FileBlockParam = {
   type: 'image' | 'document'
-  source: { type: 'file'; file_id: string }
+  source:
+    | { type: 'file'; file_id: string }
+    | { type: 'base64'; media_type: string; data: string }
 }
 
 /** 接口接受的调用块；历史只回传 kind 为 read_link 的调用 */

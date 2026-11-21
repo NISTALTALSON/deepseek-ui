@@ -58,6 +58,7 @@ export const AssistantMessage = memo(function AssistantMessage({
   const summaryEntry = `${message.id}-summary`
   return (
     <div className={styles.message}>
+      <div className={styles.workLabel}>{message.workMode === 'conversation' ? 'EMILY / RESPONSE' : 'PATCH REVIEW / MODEL OUTPUT'}</div>
       {refused ? null : (
         <ReplyArea
           message={message}

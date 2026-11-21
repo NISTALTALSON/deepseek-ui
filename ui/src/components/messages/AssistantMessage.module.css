@@ -12,7 +12,7 @@
   }
 }
 
-.message::before { content: 'EMILY / RESPONSE'; display: block; margin: 0 0 10px; color: var(--emily-accent); font: 600 9px/1.4 var(--emily-mono); letter-spacing: .1em; }
+.workLabel { display: block; margin: 0 0 10px; color: var(--emily-accent); font: 600 9px/1.4 var(--emily-mono); letter-spacing: .1em; }
 
 .waiting {
   display: flex;

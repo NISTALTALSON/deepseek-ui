@@ -142,7 +142,7 @@ const ModelConnectionSetting = () => {
     <div className={styles.modelConnection}>
       <div>
         <div className={styles.label}>Emily model connection</div>
-        <div className={styles.description}>Connect an Anthropic Messages API compatible Emily endpoint. Leave the URL blank to use the model configured in the Emily gateway.</div>
+        <div className={styles.description}>Connect a streaming Anthropic Messages API compatible Emily endpoint. Patch images are sent as inline base64 image blocks; leave the URL blank to use the configured Emily gateway.</div>
       </div>
       <label className={styles.modelField}>
         <span>API base URL</span>

@@ -24,6 +24,7 @@ import {
   getContextRounds,
   settleReply,
   toRequestMessages,
+  type InlineImageSource,
 } from './reply.js'
 import {
   toSessionSummary,
@@ -37,8 +38,9 @@ import {
 
 /** deepseek-flash 同时支持深度思考与图片输入 */
 const MODEL: ChatModel = 'deepseek-flash'
-/** 所有生成请求统一携带的助手身份说明 */
-const SYSTEM_PROMPT = '该助手为DeepSeek，由深度求索公司创造。'
+/** Base identity; patch review instructions are added only in that work mode. */
+const SYSTEM_PROMPT = 'You are Emily, an assistant for reviewing lymph-node histopathology patches.'
+const PATCH_REVIEW_PROMPT = `Review the submitted lymph-node histopathology image at patch level only. Report the model's classification as tumor tissue, no tumor detected, or review required. Report a confidence or score only when the classifier response provides one; never invent or infer a numeric score. Describe visible evidence only when the image is available and legible. State image-quality or out-of-distribution concerns when apparent. Do not present this patch result as a patient-level diagnosis or clinical conclusion.`
 /** 保留最近打开的详情；当前会话、生成中及尚未成功保存的会话不淘汰。 */
 const SESSION_CACHE_LIMIT = 5
 /** 安全审核固定开启，所有请求都走扩展模式 */
@@ -264,7 +266,7 @@ export const bindChatPersistence = () => {
 
 /** 按当前开关创建回复：深度思考对应 thinking，智能搜索控制 deepseek_web_search。 */
 const createReply = (): AssistantMessage => {
-  const { thinking, search, model } = useSettings.getState()
+  const { thinking, search, model, workMode } = useSettings.getState()
   return {
     id: createId(),
     role: 'assistant',
@@ -272,6 +274,7 @@ const createReply = (): AssistantMessage => {
     model: useWorkspace.getState().model ?? model,
     thinking,
     search,
+    workMode,
     prefix: true,
     status: 'pending',
     blocks: [],
@@ -640,7 +643,8 @@ export const sendMessage = (targetSessionId: string | null) => {
   if (get().importingHistory || !get().ready) {
     return false
   }
-  const prepared = prepareDraftMessage(getDraft(targetSessionId), useUploads.getState().tasks)
+  const inlineImages = Boolean(useSettings.getState().modelEndpoint)
+  const prepared = prepareDraftMessage(getDraft(targetSessionId), useUploads.getState().tasks, inlineImages)
   if (!prepared) {
     return false
   }
@@ -843,6 +847,41 @@ export const retryUpload = (sessionId: string, messageId: string) => {
 
 type Request = { history: Message[]; question: UserMessage; prefix?: AssistantMessage }
 
+/** Direct Emily endpoints receive image bytes inline and do not need the gateway Files API. */
+const loadInlineImages = async (request: Request, signal: AbortSignal, sessionId: string) => {
+  const sources = new Map<string, InlineImageSource>()
+  const users = [...getContextRounds(request.history).map(([user]) => user), request.question]
+  const files = new Map<string, FileAttachment>()
+  for (const user of users.toReversed()) {
+    for (const file of user.files) {
+      if (file.isImage) files.set(file.id, file)
+    }
+    if (files.size >= 4) break
+  }
+  let totalBytes = 0
+  const pending = new Map((pendingFiles.get(sessionId) ?? []).map((file) => [file.id, file.blob]))
+  for (const file of files.values()) {
+    signal.throwIfAborted()
+    const blob = pending.get(file.id) ?? await db.loadFile(file.id)
+    if (!blob) continue
+    const mediaType = file.mimeType || blob.type || 'image/jpeg'
+    if (!['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(mediaType)) {
+      throw new Error(`Emily's direct endpoint does not support ${mediaType}. Use a PNG, JPEG, GIF, or WebP patch image.`)
+    }
+    totalBytes += blob.size
+    if (totalBytes > 20 * 1024 * 1024) {
+      throw new Error('The most recent patch images exceed the 20 MB total limit for a direct model request. Start a new review with fewer or smaller images.')
+    }
+    const bytes = new Uint8Array(await blob.arrayBuffer())
+    let binary = ''
+    for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + 0x8000, bytes.length)))
+    }
+    sources.set(file.id, { mediaType, data: btoa(binary) })
+  }
+  return sources
+}
+
 /** 把补传得到的 serverId 写回会话里所有引用同一附件的消息（编辑、重新生成会共用附件） */
 const saveServerIds = (sessionId: string, serverIds: Map<string, string>) => {
   if (serverIds.size === 0) {
@@ -910,6 +949,9 @@ const prepareFiles = async (sessionId: string, request: Request, signal: AbortSi
   // 服务端判定 file_id 失效时会清掉会话里的 serverId，先用最新消息替换请求快照，
   // 否则快照里仍是旧 id，补传会直接复用它。
   request = refreshRequest(sessionId, request)
+  if (useSettings.getState().modelEndpoint) {
+    return request
+  }
   const apiKey = useSettings.getState().apiKey ?? ''
   const serverIds = new Map<string, string>()
   // 停止生成立即生效；上传本身不取消（输入框与其他消息可能共用同一任务），完成后照常写回 serverId
@@ -1081,12 +1123,14 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
         reply = { ...reply, latestReminder }
         updateReply(sessionId, reply)
         persist(sessionId)
+        const inlineSources = useSettings.getState().modelEndpoint ? await loadInlineImages(prepared, controller.signal, sessionId) : undefined
         const messages = toRequestMessages(
           prepared.history,
           prepared.question,
           prepared.prefix,
           initial.thinking ?? false,
-          latestReminder
+          latestReminder,
+          inlineSources
         )
         const events = streamMessage(
           useSettings.getState().apiKey ?? '',
@@ -1096,6 +1140,7 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
               : initial.model ?? MODEL,
             system: [
               SYSTEM_PROMPT,
+              initial.workMode === 'patch-review' ? PATCH_REVIEW_PROMPT : '',
               `Enabled skills: ${useWorkspace.getState().enabledSkills.join(', ') || 'none'}.`,
               `Enabled integrations: ${useWorkspace
                 .getState()
