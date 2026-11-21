@@ -8,24 +8,18 @@
   cursor: text;
   font-size: 16px;
   line-height: var(--line-height);
-  border-radius: 7px;
-  border: 1px solid var(--emily-rule-strong);
-  background: var(--dsw-specific-input-major);
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--emily-rule-strong) 62%, transparent);
+  background: color-mix(in srgb, var(--dsw-specific-input-major) 90%, var(--emily-panel));
   overflow: hidden;
 }
 
 .session {
-  box-shadow:
-    0 4px 10px rgba(0, 0, 0, 0.02),
-    0 2px 4px rgba(0, 0, 0, 0.04);
+  box-shadow: var(--emily-shadow-soft);
 }
 
 .home {
-  box-shadow: 0 4px 18px rgba(31, 32, 28, .045);
-
-  [data-ds-dark-theme] & {
-    box-shadow: none;
-  }
+  box-shadow: var(--emily-shadow-raised);
 }
 
 .attachments {
@@ -302,7 +296,7 @@
   height: 34px;
   padding: 0 11px 0 7px;
   border: 1px solid color-mix(in srgb, var(--dsw-alias-brand-primary) 25%, var(--dsw-alias-border-l2));
-  border-radius: 5px;
+  border-radius: 8px;
   color: var(--dsw-alias-label-primary);
   background: transparent;
   font: inherit;
@@ -313,7 +307,7 @@
 }
 
 .modelPicker:hover { border-color: var(--emily-accent); background: color-mix(in srgb, var(--emily-accent) 6%, transparent); }
-.modelMark { display: grid; place-items: center; width: 19px; height: 19px; border-radius: 3px; color: var(--emily-paper); background: var(--emily-ink); font-family: Georgia, serif; font-size: 14px; }
+.modelMark { display: grid; place-items: center; width: 19px; height: 19px; border-radius: 6px; color: var(--emily-paper); background: var(--emily-ink); font-family: var(--emily-serif); font-size: 14px; }
 .pickerChevron { color: var(--dsw-alias-label-tertiary); font-size: 13px; }
 .agentPicker { gap: 0; padding-right: 6px; padding-left: 9px; }
 .agentPicker select { max-width: 112px; border: 0; outline: 0; color: inherit; background: transparent; font: inherit; font-size: 11px; cursor: pointer; }
@@ -342,7 +336,7 @@
   margin-left: 6px;
   padding: 0;
   border: none;
-  border-radius: 5px;
+  border-radius: 9px;
   background: var(--emily-ink);
   color: var(--dsw-static-neutral-bluish-00);
   cursor: pointer;

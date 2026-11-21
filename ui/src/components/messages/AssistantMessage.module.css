@@ -9,6 +9,12 @@
 
   :global(.ds-assistant-message-main-content) {
     padding-bottom: 6px;
+
+    h1, h2, h3, h4 {
+      font-family: var(--emily-serif);
+      font-weight: 500;
+      letter-spacing: -.02em;
+    }
   }
 }
 
