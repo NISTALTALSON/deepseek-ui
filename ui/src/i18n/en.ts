@@ -1,7 +1,27 @@
 import type { zh } from './zh.js'
 
 export const en = {
-  welcomeMessageChat250808: 'How can I help you?',
+  welcomeMessageChat250808: 'A little more clarity,\na lot more possibility.',
+  welcomeKicker: 'NEW WORKING NOTE',
+  welcomeIndex: '01 — 03',
+  welcomeHeadline: 'Put the hard part\non the table.',
+  welcomeIntro: 'Bring a question, a tangled thought, or a rough idea. Emily keeps conversation, research, and work together.',
+  welcomeRule: 'One thread. Room to work.',
+  welcomeRoutesHeading: 'CHOOSE A STARTING POINT',
+  welcomeRoutesCount: 'ROUTES / 03',
+  welcomeRouteOne: 'Find the signal',
+  welcomeRouteOneDetail: 'Research a question and keep the sources close.',
+  welcomeRouteOnePrompt: 'Research this question with sources: ',
+  welcomeRouteTwo: 'Untangle a problem',
+  welcomeRouteTwoDetail: 'Lay out the pieces, then decide what matters.',
+  welcomeRouteTwoPrompt: 'Help me untangle this problem: ',
+  welcomeRouteThree: 'Make a first pass',
+  welcomeRouteThreeDetail: 'Turn a rough idea into something you can work with.',
+  welcomeRouteThreePrompt: 'Help me make a first pass at: ',
+  welcomeComposeLabel: 'YOUR NOTE',
+  welcomeComposeHint: 'ENTER TO SEND · SHIFT + ENTER FOR A NEW LINE',
+  welcomeDeviceNotice: 'CONVERSATIONS STAY ON THIS DEVICE',
+  welcomeAccuracyNotice: 'EMILY CAN BE WRONG. CHECK IMPORTANT DETAILS.',
   contentCaveat: 'AI-generated, for reference only',
   expandSiderbarButton: 'Open sidebar',
   collapseSiderbarButton: 'Close sidebar',
@@ -14,7 +34,7 @@ export const en = {
     'Chats or attachments have not been saved locally. Retry before closing this page.',
   sessionDeleteFailed: 'Unable to delete this chat. Please try again.',
   settings: 'Settings',
-  appName: 'API usage demo',
+  appName: 'Emily',
   deleteSessionModalContentTitle: 'Delete chat?',
   deleteSessionWithFilesDescription:
     'This chat and its uploaded files will be permanently deleted and cannot be recovered. Delete this chat?',
@@ -83,7 +103,7 @@ export const en = {
   groupTitleToolOpen: 'Browsing the web',
   messageThinking: 'Thinking',
   backupInvalidJson: 'The file is not valid JSON.',
-  backupUnrecognized: 'File not recognized. Please choose a DeepSeek chat history ZIP.',
+  backupUnrecognized: 'File not recognized. Please choose a compatible chat history ZIP.',
   backupNewerVersion: 'This file uses a newer version. Please update the app before importing.',
   backupInvalidVersion: 'The file version is invalid and cannot be imported.',
   backupIncomplete: 'The file is incomplete and cannot be imported.',
@@ -116,11 +136,11 @@ export const en = {
   historyImportConfirmDescription:
     'The uploaded chat history will replace all your current chats. Import anyway?',
   historyImportDescription:
-    'Importing chat history replaces all local chats and attachments. Supports ZIP files exported from DeepSeek.',
+    'Importing chat history replaces all local chats and attachments. Supports compatible chat export ZIP files.',
   historyImportedOne: 'Imported 1 chat',
   historyImported: 'Imported {count} chats',
   historyImportFailed:
-    'File import failed. The file format may be invalid, or the ZIP file may use an older chat export format. Please export your chat history from DeepSeek again and retry the import.',
+    'File import failed. The file format may be invalid, or the ZIP file may use an older chat export format. Export the conversation again and retry.',
   historyExportFailed: 'Export failed: {message}',
   exportAllLabel: 'Export all chats',
   historyExportDescription:

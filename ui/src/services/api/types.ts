@@ -4,7 +4,7 @@
  * 声明 deepseek_web_search / deepseek_read_url 或设置 safety_check.level 为 high 时进入扩展模式。
  */
 
-export type ChatModel = 'deepseek-flash' | 'deepseek-v4-pro' | 'mock'
+export type ChatModel = 'deepseek-flash' | 'deepseek-v4-pro' | 'mock' | (string & {})
 
 // ---------- 响应：内容块 ----------
 
@@ -147,7 +147,9 @@ export type TextBlockParam = { type: 'text'; text: string }
  */
 export type FileBlockParam = {
   type: 'image' | 'document'
-  source: { type: 'file'; file_id: string }
+  source:
+    | { type: 'file'; file_id: string }
+    | { type: 'base64'; media_type: string; data: string }
 }
 
 /** 接口接受的调用块；历史只回传 kind 为 read_link 的调用 */

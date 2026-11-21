@@ -1,6 +1,35 @@
 :root {
   --message-list-max-width: 840px;
   --message-list-padding-horizontal: 44px;
+  --dsw-static-blue-500: #7967c7;
+  --dsw-static-blue-450: #907fda;
+  --dsw-static-blue-400: #a89ae4;
+  --dsw-static-blue-50: #f4f1ff;
+  --dsw-static-blue-100: #eae5ff;
+  --dsw-static-blue-300: #c9bdf6;
+  --dsw-static-neutral-bluish-50: #fbfaf8;
+  --dsw-static-neutral-bluish-60: #f6f4f1;
+  --dsw-static-neutral-bluish-75: #f1efeb;
+  --dsw-static-neutral-bluish-100: #e9e6e1;
+  --dsw-static-neutral-bluish-950: #17161c;
+  --dsw-static-neutral-bluish-900: #201f27;
+  --dsw-static-neutral-bluish-850: #292832;
+  --dsw-static-neutral-bluish-800: #33323d;
+  --emily-paper: #f4f1ee;
+  --emily-panel: #f0ecea;
+  --emily-ink: #20211e;
+  --emily-secondary: #50534d;
+  --emily-muted: #777a71;
+  --emily-rule: rgba(46, 48, 42, .12);
+  --emily-rule-strong: rgba(46, 48, 42, .28);
+  --emily-accent: #66547d;
+  --emily-eosin: #b7657b;
+  --emily-serif: 'Iowan Old Style', 'Baskerville Old Face', 'Palatino Linotype', 'Book Antiqua', Georgia, serif;
+  --emily-sans: 'Aptos', 'Segoe UI Variable Text', 'Segoe UI', ui-sans-serif, system-ui, sans-serif;
+  --emily-mono: 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
+  --emily-shadow-raised: 8px 9px 22px rgba(67, 53, 69, .08), -6px -6px 18px rgba(255, 255, 255, .82), inset 1px 1px 0 rgba(255, 255, 255, .72);
+  --emily-shadow-soft: 3px 4px 12px rgba(67, 53, 69, .055), -3px -3px 10px rgba(255, 255, 255, .68), inset 1px 1px 0 rgba(255, 255, 255, .6);
+  --emily-shadow-pressed: inset 2px 3px 7px rgba(67, 53, 69, .08), inset -2px -2px 7px rgba(255, 255, 255, .62);
 }
 
 @media (max-width: 1023px) {
@@ -14,7 +43,7 @@ body {
   overflow: hidden;
   margin: 0;
   word-break: break-word;
-  font-family: var(--dsw-font-family);
+  font-family: var(--emily-sans);
   font-size: var(--ds-font-size-m);
   color: var(--dsw-alias-label-primary);
   background-color: var(--dsw-alias-bg-base);
@@ -27,6 +56,12 @@ body {
   --scroll-color: rgba(0, 0, 0, 0.08);
   --scroll-color-hover: rgba(0, 0, 0, 0.15);
 }
+
+body:not([data-ds-dark-theme]) { --dsw-static-blue-500: #66547d; --dsw-static-blue-450: #79678f; --dsw-static-blue-400: #89789e; --dsw-alias-bg-base: var(--emily-paper); --dsw-specific-sidebar-fill: #eee9e6; --dsw-specific-bubble: #ece7e5; --emily-ink: #242129; --emily-secondary: #55515c; --emily-muted: #77727d; --emily-rule: rgba(50, 43, 57, .12); --emily-rule-strong: rgba(50, 43, 57, .27); --emily-accent: #66547d; --emily-eosin: #b7657b; }
+body[data-ds-dark-theme] { --dsw-static-blue-500: #bda9d4; --dsw-static-blue-450: #cdbbe0; --dsw-static-blue-400: #ddcde9; --dsw-alias-bg-base: #201e24; --dsw-specific-sidebar-fill: #27242c; --dsw-specific-bubble: #2b2730; --emily-paper: #201e24; --emily-panel: #29262e; --emily-ink: #f0eaf1; --emily-secondary: #cec6d1; --emily-muted: #a198a5; --emily-rule: rgba(233, 225, 237, .12); --emily-rule-strong: rgba(233, 225, 237, .26); --emily-accent: #c6addb; --emily-eosin: #d88da2; --emily-shadow-raised: 8px 9px 24px rgba(0, 0, 0, .3), -4px -4px 14px rgba(255, 255, 255, .025), inset 1px 1px 0 rgba(255, 255, 255, .055); --emily-shadow-soft: 3px 4px 12px rgba(0, 0, 0, .22), -3px -3px 9px rgba(255, 255, 255, .02), inset 1px 1px 0 rgba(255, 255, 255, .04); --emily-shadow-pressed: inset 2px 3px 7px rgba(0, 0, 0, .28), inset -2px -2px 7px rgba(255, 255, 255, .025); }
+
+button, input, textarea, select { font-family: var(--emily-sans); }
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid color-mix(in srgb, var(--emily-accent) 72%, transparent); outline-offset: 2px; }
 
 body.dark {
   color-scheme: dark;

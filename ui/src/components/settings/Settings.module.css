@@ -211,6 +211,37 @@
   padding-bottom: 4px;
 }
 
+.modelConnection {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  padding: 12px 0 18px;
+  border-bottom: 1px solid var(--dsw-alias-border-l2-darkmode-thin);
+}
+
+.modelField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+}
+
+.modelField input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 38px;
+  padding: 0 11px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 10px;
+  outline: 0;
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-bg-base);
+  font: inherit;
+}
+
+.modelField input:focus { border-color: var(--dsw-alias-brand-primary); }
+
 .apiKeySaved,
 .apiKeyInput {
   display: flex;

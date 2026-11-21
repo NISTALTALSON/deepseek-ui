@@ -7,10 +7,14 @@ export type Locale = 'zh-CN' | 'en-US'
 
 /** 主题偏好；默认跟随系统 */
 export type ThemePreference = 'light' | 'dark' | 'system'
+export type WorkMode = 'patch-review' | 'conversation'
 
 /** 本机设置，存 localStorage：API Key、语言、主题、位置、朗读音色、深度思考与智能搜索开关、侧边栏收起状态 */
 type Settings = {
   apiKey: string | null
+  modelEndpoint: string
+  modelId: string
+  workMode: WorkMode
   locale: Locale
   themePreference: ThemePreference
   location: UserLocation | null
@@ -23,6 +27,9 @@ type Settings = {
 
 const KEYS = {
   apiKey: 'chat-demo:api-key',
+  modelEndpoint: 'emily:model-endpoint',
+  modelId: 'emily:model-id',
+  workMode: 'emily:work-mode',
   locale: 'chat-demo:locale',
   location: 'chat-demo:location',
   themePreference: 'chat-demo:theme-preference',
@@ -91,6 +98,9 @@ const initialTtsVoice = (): TtsVoice => (read(KEYS.ttsVoice) === 'tide' ? 'tide'
 
 export const useSettings = create<Settings>(() => ({
   apiKey: read(KEYS.apiKey),
+  modelEndpoint: read(KEYS.modelEndpoint) ?? '',
+  modelId: read(KEYS.modelId) ?? 'emily',
+  workMode: read(KEYS.workMode) === 'conversation' ? 'conversation' : 'patch-review',
   locale: initialLocale(),
   location: initialLocation(),
   themePreference: initialThemePreference(),
@@ -125,6 +135,23 @@ export const setTtsVoice = (ttsVoice: TtsVoice) => {
 export const setApiKey = (apiKey: string | null) => {
   write(KEYS.apiKey, apiKey)
   useSettings.setState({ apiKey })
+}
+
+export const setModelEndpoint = (modelEndpoint: string) => {
+  const normalized = modelEndpoint.trim().replace(/\/+$/, '')
+  write(KEYS.modelEndpoint, normalized || null)
+  useSettings.setState({ modelEndpoint: normalized })
+}
+
+export const setModelId = (modelId: string) => {
+  const normalized = modelId.trim() || 'emily'
+  write(KEYS.modelId, normalized)
+  useSettings.setState({ modelId: normalized })
+}
+
+export const setWorkMode = (workMode: WorkMode) => {
+  write(KEYS.workMode, workMode)
+  useSettings.setState({ workMode })
 }
 
 export const setThinking = (thinking: boolean) => {

@@ -5,15 +5,16 @@
   box-sizing: border-box;
   height: 40px;
   padding: 9px 6px 9px 10px;
-  border-radius: 12px;
+  border-radius: 8px;
   font-size: 14px;
   line-height: 22px;
   color: var(--dsw-alias-label-primary);
   cursor: pointer;
 
   &.active {
-    background-color: var(--dsw-specific-sidebar-nav-item-active-accent);
-    color: var(--dsw-alias-brand-primary-invert);
+    background-color: color-mix(in srgb, var(--emily-accent) 10%, transparent);
+    color: var(--dsw-alias-label-primary);
+    box-shadow: var(--emily-shadow-pressed), inset 2px 0 0 var(--emily-accent);
   }
 
   @media (hover: hover) {

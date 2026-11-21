@@ -61,7 +61,8 @@ const upload = (attachment: DraftAttachment, apiKey: string) => {
 export const addDraftFiles = (
   sessionId: string | null,
   files: File[],
-  apiKey: string
+  apiKey: string,
+  inlineImages = false
 ): TranslationMessage | null => {
   if (files.length === 0) {
     return null
@@ -80,7 +81,9 @@ export const addDraftFiles = (
     }
   })
   updateDraft(sessionId, (draft) => ({ ...draft, attachments: [...draft.attachments, ...added] }))
-  added.forEach((attachment) => upload(attachment, apiKey))
+  added.forEach((attachment) => {
+    if (!inlineImages || !attachment.isImage) upload(attachment, apiKey)
+  })
   return null
 }
 
@@ -95,14 +98,26 @@ export const retryDraftAttachment = (
   }
 }
 
-/** 发送按钮和实际提交共用规则：有内容，且全部附件已上传成功。 */
-export const prepareDraftMessage = (draft: Draft, tasks: Record<string, UploadTask>) => {
+/** Send button and submit share readiness rules for uploaded files or inline Emily images. */
+export const prepareDraftMessage = (draft: Draft, tasks: Record<string, UploadTask>, inlineImages = false) => {
   const text = draft.text.trim()
   if (!text && draft.attachments.length === 0) {
     return null
   }
   const files: (FileAttachment & { serverId: string; blob: Blob })[] = []
   for (const attachment of draft.attachments) {
+    if (inlineImages && attachment.isImage) {
+      files.push({
+        id: attachment.id,
+        serverId: '',
+        name: attachment.file.name,
+        size: attachment.file.size,
+        isImage: true,
+        mimeType: resolveMimeType(attachment.file),
+        blob: attachment.file,
+      })
+      continue
+    }
     const task = tasks[attachment.id]
     if (task?.status !== 'done' || !task.serverId) {
       return null

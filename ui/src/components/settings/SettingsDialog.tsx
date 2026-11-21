@@ -25,6 +25,8 @@ import {
   setThemePreference,
   setTtsVoice,
   useSettings,
+  setModelEndpoint,
+  setModelId,
   type ThemePreference,
 } from '../../services/settings.js'
 import { useTranslate, type TranslationKey, type TranslationMessage } from '../../i18n/index.js'
@@ -103,6 +105,7 @@ const SettingsContent = () => {
             </>
           ) : (
             <>
+              <ModelConnectionSetting />
               <ApiKeyField editor={apiKeyEditor} />
               <ImportHistory historyImport={historyImport} disabled={historyBusy} />
               <ExportHistory disabled={historyBusy} />
@@ -129,6 +132,27 @@ const SettingsContent = () => {
       {historyImport.file ? <ImportConfirm historyImport={historyImport} /> : null}
       {historyDelete.opened ? <DeleteAllConfirm historyDelete={historyDelete} /> : null}
     </>
+  )
+}
+
+const ModelConnectionSetting = () => {
+  const endpoint = useSettings((state) => state.modelEndpoint)
+  const modelId = useSettings((state) => state.modelId)
+  return (
+    <div className={styles.modelConnection}>
+      <div>
+        <div className={styles.label}>Emily model connection</div>
+        <div className={styles.description}>Connect a streaming Anthropic Messages API compatible Emily endpoint. Patch images are sent as inline base64 image blocks; leave the URL blank to use the configured Emily gateway.</div>
+      </div>
+      <label className={styles.modelField}>
+        <span>API base URL</span>
+        <input value={endpoint} onChange={(event) => setModelEndpoint(event.target.value)} placeholder="https://your-model.example/v1" spellCheck={false} />
+      </label>
+      <label className={styles.modelField}>
+        <span>Model ID</span>
+        <input value={modelId} onChange={(event) => setModelId(event.target.value)} placeholder="emily" spellCheck={false} />
+      </label>
+    </div>
   )
 }
 

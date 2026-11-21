@@ -1,6 +1,7 @@
 import { translate, type TranslationMessage } from '../../i18n/index.js'
 import { readMessageEvent } from './parseEvent.js'
 import { readServerSentEvents } from './sse.js'
+import { useSettings } from '../settings.js'
 import type {
   ApiErrorBody,
   CreateMessageRequest,
@@ -12,7 +13,8 @@ import type {
 /** 构建期 API 地址，默认 https://api.deepseek.com；本地开发支持开发服务器代理 */
 export const API_ORIGIN = __API_ORIGIN__
 /** Anthropic 兼容接口的前缀 */
-const ANTHROPIC_BASE_URL = `${API_ORIGIN}/anthropic/v1`
+const defaultMessagesBaseUrl = `${API_ORIGIN}/anthropic/v1`
+const messagesBaseUrl = () => useSettings.getState().modelEndpoint || defaultMessagesBaseUrl
 /** 引用 Files API 上传的图片、调用 Anthropic 兼容 Files API 时必须携带 */
 const FILES_BETA = 'files-api-2025-04-14'
 
@@ -110,8 +112,9 @@ const anthropicHeaders = (apiKey: string, beta: boolean): Record<string, string>
 })
 
 /** 用 GET /models 校验 API Key（不产生费用） */
-export const verifyApiKey = async (apiKey: string, signal?: AbortSignal): Promise<void> => {
-  await request(`${API_ORIGIN}/models`, {
+export const verifyApiKey = async (apiKey: string, signal?: AbortSignal, endpoint?: string): Promise<void> => {
+  const base = endpoint?.trim().replace(/\/+$/, '') || API_ORIGIN
+  await request(`${base}/models`, {
     method: 'GET',
     headers: { Authorization: `Bearer ${apiKey}` },
     signal,
@@ -133,7 +136,7 @@ export const uploadFile = async (
     form.append('purpose', purpose)
   }
   form.append('file', file)
-  const response = await request(`${ANTHROPIC_BASE_URL}/files`, {
+  const response = await request(`${messagesBaseUrl()}/files`, {
     method: 'POST',
     headers: anthropicHeaders(apiKey, true),
     body: form,
@@ -144,7 +147,7 @@ export const uploadFile = async (
 
 /** DELETE /anthropic/v1/files/{file_id} */
 export const deleteFile = async (apiKey: string, fileId: string): Promise<void> => {
-  await request(`${ANTHROPIC_BASE_URL}/files/${encodeURIComponent(fileId)}`, {
+  await request(`${messagesBaseUrl()}/files/${encodeURIComponent(fileId)}`, {
     method: 'DELETE',
     headers: anthropicHeaders(apiKey, true),
   })
@@ -167,15 +170,35 @@ export async function* streamMessage(
   signal: AbortSignal,
   extraHeaders: Record<string, string> = {}
 ): AsyncGenerator<MessageStreamEvent> {
-  const response = await request(`${ANTHROPIC_BASE_URL}/messages`, {
+  const directEndpoint = Boolean(useSettings.getState().modelEndpoint)
+  const reminders = body.messages.filter((message) => message.role === 'latest_reminder')
+  const messages = body.messages
+    .filter((message) => message.role !== 'latest_reminder')
+    .map((message) =>
+      message.role === 'assistant'
+        ? { ...message, content: message.content.filter((block) => block.type === 'text') }
+        : message
+    )
+    .filter((message) => message.role !== 'assistant' || message.content.length > 0)
+  const requestBody = directEndpoint
+    ? {
+        model: body.model,
+        max_tokens: 4096,
+        system: [body.system, ...reminders.map((message) => message.content)].filter(Boolean).join('\n\n'),
+        messages,
+        stream: true,
+      }
+    : { ...body, stream: true }
+  const response = await request(`${messagesBaseUrl()}/messages`, {
     method: 'POST',
     headers: {
-      ...anthropicHeaders(apiKey, hasFile(body)),
+      ...anthropicHeaders(apiKey, !directEndpoint && hasFile(body)),
+      'anthropic-version': '2023-06-01',
       'Content-Type': 'application/json',
       Accept: 'text/event-stream',
-      ...extraHeaders,
+      ...(directEndpoint ? {} : extraHeaders),
     },
-    body: JSON.stringify({ ...body, stream: true }),
+    body: JSON.stringify(requestBody),
     signal,
   })
   const contentType = response.headers.get('Content-Type') ?? ''

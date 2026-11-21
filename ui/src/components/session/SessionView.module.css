@@ -1,120 +1,34 @@
-.view {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-}
+.view { position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--dsw-alias-bg-base); }
 
-.header {
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
-  height: 60px;
-  padding: 12px 18px 0;
-  box-sizing: border-box;
-  background: var(--dsw-alias-bg-base);
-}
+.header { display: flex; align-items: center; gap: 22px; flex-shrink: 0; min-height: 66px; padding: 10px clamp(18px, 3vw, 38px); box-sizing: border-box; border-bottom: 1px solid var(--emily-rule); background: color-mix(in srgb, var(--dsw-alias-bg-base) 84%, transparent); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); }
+.modelButton { display: inline-flex; align-items: center; gap: 7px; flex-shrink: 0; padding: 0; border: 0; color: var(--emily-ink); background: transparent; font: 600 11px/1.4 var(--emily-mono); text-transform: uppercase; cursor: pointer; }
+.modelButton:hover { color: var(--emily-accent); }
+.modelMark { display: grid; place-items: center; width: 25px; height: 25px; border-radius: 8px; color: var(--emily-paper); background: var(--emily-ink); font: 17px/1 var(--emily-serif); text-transform: lowercase; box-shadow: var(--emily-shadow-soft); }
+.modelPrefix, .modelChevron { color: var(--emily-muted); }
+.title { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2px; padding: 0 18px; border-left: 1px solid var(--emily-rule); }
+.title strong { overflow: hidden; color: var(--emily-ink); font-family: var(--emily-serif); font-size: 16px; line-height: 1.25; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+.threadMeta { color: var(--emily-muted); font: 600 8px/1.35 var(--emily-mono); letter-spacing: .11em; }
+.headerActions { display: flex; align-items: center; gap: 7px; }
+.toolButton { display: flex; align-items: center; gap: 7px; padding: 8px 9px; border: 1px solid transparent; border-radius: 8px; color: var(--emily-secondary); background: transparent; font: 11px/1.2 var(--emily-sans); cursor: pointer; }
+.toolButton > span { color: var(--emily-muted); font: 9px/1 var(--emily-mono); }
+.toolButton:hover, .toolButtonActive { border-color: color-mix(in srgb, var(--emily-rule-strong) 52%, transparent); background: var(--emily-panel); box-shadow: var(--emily-shadow-soft); }
+.toolButtonActive { color: var(--emily-accent); }
 
-.activityButton {
-  margin-left: auto;
-  padding: 7px 10px;
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 8px;
-  background: transparent;
-  color: var(--dsw-alias-label-secondary);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
+.content { display: flex; min-height: 0; flex: 1; }
+.content > :first-child { min-width: 0; flex: 1; }
+.inputContainer { position: sticky; bottom: 0; z-index: 10; display: flex; flex-direction: column; align-items: center; box-sizing: border-box; width: min(800px, calc(100% - 56px)); max-width: calc(100% - 32px); margin: auto auto 0; padding-top: 22px; background: linear-gradient(to bottom, transparent, var(--dsw-alias-bg-base) 22px); }
+.caveat { width: 100%; padding: 7px 0; color: var(--emily-muted); font: 8px/1.5 var(--emily-mono); letter-spacing: .06em; text-align: center; }
 
-.activityButton:hover {
-  background: var(--dsw-alias-fill-tertiary);
-  color: var(--dsw-alias-label-primary);
-}
-
-.content {
-  display: flex;
-  min-height: 0;
-  flex: 1;
-}
-
-.content > :first-child {
-  min-width: 0;
-  flex: 1;
-}
-
-.modelButton {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-  padding: 8px 10px;
-  border: 0;
-  border-radius: 8px;
-  color: var(--dsw-alias-label-primary);
-  background: var(--dsw-alias-fill-tertiary);
-  font: var(--dsw-font-s-strong-14);
-  cursor: pointer;
-}
-
-.modelButton:hover {
-  background: var(--dsw-alias-fill-secondary);
-}
-
-.modelChevron {
-  color: var(--dsw-alias-label-tertiary);
-}
-
-.title {
-  max-width: 480px;
-  padding: 8px 12px;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  font: var(--dsw-font-s-strong-14);
-  color: var(--dsw-alias-label-primary);
-}
-
-.withCollapsedSider {
-  margin-left: 113px;
-}
-
-.inputContainer {
-  position: sticky;
-  bottom: 0;
-  z-index: 10;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  box-sizing: border-box;
-  width: calc(var(--message-list-max-width) - 64px);
-  max-width: calc(100% - 32px);
-  margin: auto auto 0;
-  background: linear-gradient(
-    to bottom,
-    transparent 0%,
-    transparent 30%,
-    var(--dsw-alias-bg-base) 30%,
-    var(--dsw-alias-bg-base) 100%
-  );
-}
-
-.caveat {
-  width: 100%;
-  padding: 6px 0;
-  font-size: 11px;
-  line-height: 16px;
-  text-align: center;
-  color: var(--dsw-alias-label-tertiary);
-  user-select: none;
-}
-
-@media not all and (min-width: 768px) {
-  .inputContainer {
-    position: relative;
-    bottom: auto;
-    flex-shrink: 0;
-    margin: 0 auto;
-    padding-bottom: env(safe-area-inset-bottom);
-  }
+@media (max-width: 767px) {
+  .header { min-height: 54px; gap: 8px; padding: 6px 7px; }
+  .headerActions { gap: 2px; }
+  .modelButton { gap: 5px; font-size: 9px; }
+  .modelPrefix { display: none; }
+  .modelMark { width: 21px; height: 21px; }
+  .title { padding: 0 7px; }
+  .title strong { font-size: 13px; }
+  .threadMeta { font-size: 7px; }
+  .toolButton { padding: 6px; font-size: 0; }
+  .toolButton > span { font-size: 9px; }
+  .inputContainer { position: relative; bottom: auto; flex-shrink: 0; width: calc(100% - 24px); max-width: none; margin: 0 auto; padding-top: 8px; padding-bottom: env(safe-area-inset-bottom); background: var(--dsw-alias-bg-base); }
 }

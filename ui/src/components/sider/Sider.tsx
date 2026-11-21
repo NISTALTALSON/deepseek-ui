@@ -16,6 +16,16 @@ import { openAgents } from '../../services/agents.js'
 import { closeMobileSider, useMobileSider } from './mobileSiderState.js'
 import { SessionItem } from './SessionItem.js'
 import styles from './Sider.module.css'
+import { openWorkspace, useWorkspace, type WorkspaceTab } from '../../services/workspace.js'
+
+const workspaceLinks: { id: WorkspaceTab; label: string; icon: string }[] = [
+  { id: 'models', label: 'Models', icon: '◈' },
+  { id: 'skills', label: 'Skills', icon: '✦' },
+  { id: 'tools', label: 'Tools', icon: '⌘' },
+  { id: 'plugins', label: 'Plugins', icon: '◇' },
+  { id: 'mcp', label: 'MCP servers', icon: '⛓' },
+  { id: 'connectors', label: 'Connectors', icon: '↗' },
+]
 
 /** 展开的侧边栏：名称与收起按钮、开启新对话、按时间分组的会话列表、底部设置；移动端放在抽屉里，收起按钮关闭抽屉 */
 export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
@@ -27,6 +37,9 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
   const [deletePending, setDeletePending] = useState(false)
   const [query, setQuery] = useState('')
   const [showArchived, setShowArchived] = useState(false)
+  const workspaceTab = useWorkspace((state) => state.open ? state.tab : null)
+  const skillCount = useWorkspace((state) => state.gatewaySkillInfo.length)
+  const toolCount = useWorkspace((state) => state.gatewayTools.length)
   const visibleSessions = useMemo(() => {
     const normalized = query.trim().toLowerCase()
     return sessions.filter((session) => {
@@ -68,7 +81,10 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
   return (
     <div className={clsx(styles.sider, mobile && styles.mobile)}>
       <div className={styles.top}>
-        <div className={styles.appName}>{t('appName')}</div>
+        <div className={styles.brand}>
+          <span className={styles.brandMark}>e</span>
+          <span className={styles.appName}>{t('appName')}</span>
+        </div>
         <IconButton
           size="m"
           icon={<IconPanelLeftOutline16 />}
@@ -90,6 +106,24 @@ export const Sider = ({ mobile = false }: { mobile?: boolean }) => {
         </span>
         {t('newChat')}
       </button>
+      <div className={styles.workspaceNav}>
+        <div className={styles.navHeading}>YOUR WORKSPACE</div>
+        {workspaceLinks.map((item) => {
+          const count = item.id === 'skills' ? skillCount : item.id === 'tools' ? toolCount : null
+          return (
+            <button
+              key={item.id}
+              type="button"
+              className={`${styles.workspaceLink} ${workspaceTab === item.id ? styles.workspaceLinkActive : ''}`}
+              onClick={() => { openWorkspace(item.id); closeMobileSider() }}
+            >
+              <span className={styles.workspaceGlyph}>{item.icon}</span>
+              <span>{item.label}</span>
+              {count ? <span className={styles.workspaceCount}>{count}</span> : null}
+            </button>
+          )
+        })}
+      </div>
       <label className={styles.search}>
         <span className={styles.searchIcon}>⌕</span>
         <input

@@ -117,7 +117,7 @@ const AgentBuilderContent = () => {
           <label>Description<textarea rows={2} value={draft.description ?? ''} onChange={(event) => setField('description', event.target.value)} /></label>
           <label>System instructions<textarea rows={5} value={draft.instructions ?? ''} onChange={(event) => setField('instructions', event.target.value)} /></label>
           <div className={styles.cards}>
-            <label>Provider<select value={draft.provider ?? 'mock'} onChange={(event) => setField('provider', event.target.value as Agent['provider'])}><option value="mock">Local mock</option><option value="deepseek">DeepSeek</option></select></label>
+            <label>Provider<select value={draft.provider ?? 'mock'} onChange={(event) => setField('provider', event.target.value as Agent['provider'])}><option value="mock">Emily Sandbox</option><option value="deepseek">Hosted model</option></select></label>
             <label>Model<input value={draft.model ?? ''} onChange={(event) => setField('model', event.target.value)} /></label>
           </div>
           <label>Welcome message<textarea rows={2} value={draft.welcomeMessage ?? ''} onChange={(event) => setField('welcomeMessage', event.target.value)} /></label>
